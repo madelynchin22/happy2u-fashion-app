@@ -45,6 +45,27 @@ async function main() {
   }
   console.log("✅ Manufacturers seeded:", manufacturerNames.join(", "));
 
+  // Default competitors
+  const competitors = [
+    { name: "My Ballerine",    url: "https://www.myballerine.com",  country: "MY" },
+    { name: "Charles & Keith", url: "https://www.charleskeith.com", country: "MY" },
+    { name: "Bata Malaysia",   url: "https://www.bata.com/my",      country: "MY" },
+    { name: "Vincci",          url: "https://www.padini.com/vincci", country: "MY" },
+  ];
+  for (const c of competitors) {
+    const domain = c.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
+    const existing = await prisma.competitor.findFirst({ where: { url: { contains: domain } } });
+    if (!existing) {
+      await prisma.competitor.create({ data: { name: c.name, url: c.url, country: c.country, platform: "custom" } });
+      console.log("✅ Competitor added:", c.name);
+    } else if (existing.url !== c.url) {
+      await prisma.competitor.update({ where: { id: existing.id }, data: { name: c.name, url: c.url } });
+      console.log("✅ Competitor fixed:", c.name, "→", c.url);
+    } else {
+      console.log("⏭  Competitor already exists:", c.name);
+    }
+  }
+
   // Default exchange rate
   await prisma.exchangeRate.create({
     data: { fromCcy: "RMB", toCcy: "RM", rate: 0.62, setBy: admin.id },
