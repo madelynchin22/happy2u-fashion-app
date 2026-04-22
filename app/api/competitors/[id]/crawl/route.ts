@@ -25,6 +25,26 @@ async function tryFetch(url: string, timeoutMs = 15000) {
   }
 }
 
+/** Fallback: fetch via allorigins proxy to bypass Cloudflare/IP blocks */
+async function tryFetchViaProxy(url: string, timeoutMs = 20000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const res = await fetch(proxyUrl, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
+    const wrapper = await res.json();
+    const body: string = wrapper.contents ?? "";
+    // Reconstruct a fake Response with the proxied body
+    return new Response(body, {
+      status: wrapper.status?.http_code ?? 200,
+      headers: { "content-type": "application/json" },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function normaliseBase(rawUrl: string): string[] {
   // Returns candidate base URLs to try, no trailing slash
   const withScheme = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
@@ -35,6 +55,44 @@ function normaliseBase(rawUrl: string): string[] {
   return [...new Set([base, withWww, withoutWww])];
 }
 
+async function fetchProductsJson(url: string): Promise<any> {
+  // 1. Try direct fetch first
+  try {
+    const res = await tryFetch(url);
+    if (res.ok) {
+      const ct = res.headers.get("content-type") ?? "";
+      if (ct.includes("json")) {
+        const json = await res.json();
+        if (json.products) return json;
+      } else {
+        const text = await res.text();
+        // Cloudflare or bot wall — fall through to proxy
+        if (!text.includes("Just a moment") && !text.includes("cf-browser-verification")) {
+          // Not Cloudflare — real non-JSON response, give up
+          throw new Error(`${url} returned HTML. The site may not support /products.json`);
+        }
+      }
+    }
+  } catch (err: any) {
+    if (err.name !== "AbortError" && !err.message.includes("fetch failed")) throw err;
+  }
+
+  // 2. Fallback: route through allorigins proxy
+  try {
+    const res = await tryFetchViaProxy(url);
+    const text = await res.text();
+    if (!text.trim().startsWith("{") && !text.trim().startsWith("[")) {
+      throw new Error(`Proxy returned non-JSON from ${url}`);
+    }
+    const json = JSON.parse(text);
+    if (json.products) return json;
+  } catch (err: any) {
+    throw new Error(`Direct and proxy fetch both failed for ${url}: ${err.message}`);
+  }
+
+  throw new Error(`No products found at ${url}`);
+}
+
 async function fetchShopifyProducts(rawUrl: string) {
   const bases = normaliseBase(rawUrl);
   let lastError = "Unknown error";
@@ -42,53 +100,25 @@ async function fetchShopifyProducts(rawUrl: string) {
   for (const base of bases) {
     const url = `${base}/products.json?limit=250&page=1`;
     try {
-      const res = await tryFetch(url);
-      if (!res.ok) {
-        lastError = `HTTP ${res.status} from ${url}`;
-        continue;
-      }
-      const contentType = res.headers.get("content-type") ?? "";
-      if (!contentType.includes("json")) {
-        const text = await res.text();
-        if (text.includes("Just a moment") || text.includes("cf-browser-verification")) {
-          throw new Error(`Cloudflare protection detected on ${base} — cannot crawl automatically`);
-        }
-        if (text.toLowerCase().includes("shopify")) {
-          throw new Error(`${base} appears to be Shopify but returned HTML instead of JSON. The store may have disabled /products.json`);
-        }
-        throw new Error(`${base}/products.json returned HTML (not JSON). This site may not be Shopify, or it blocks automated requests`);
-      }
-
-      const json = await res.json();
-      if (!json.products) {
-        throw new Error(`${url} returned JSON but no "products" key — this may not be a Shopify store`);
-      }
+      const json = await fetchProductsJson(url);
 
       // Paginate
       const all: any[] = [...json.products];
       let page = 2;
       while (all.length % 250 === 0 && page <= 20) {
         const pageUrl = `${base}/products.json?limit=250&page=${page}`;
-        const pageRes = await tryFetch(pageUrl);
-        if (!pageRes.ok) break;
-        const pageJson = await pageRes.json();
-        const batch: any[] = pageJson.products ?? [];
-        if (!batch.length) break;
-        all.push(...batch);
-        page++;
+        try {
+          const pageJson = await fetchProductsJson(pageUrl);
+          const batch: any[] = pageJson.products ?? [];
+          if (!batch.length) break;
+          all.push(...batch);
+          page++;
+        } catch { break; }
       }
 
       return { products: all, resolvedBase: base };
     } catch (err: any) {
-      if (err.name === "AbortError") {
-        lastError = `Timed out connecting to ${url} (15s). The site may be slow or blocking requests`;
-        continue;
-      }
-      // Propagate meaningful errors immediately
-      if (err.message.includes("Cloudflare") || err.message.includes("returned HTML") || err.message.includes("no \"products\"")) {
-        throw err;
-      }
-      lastError = `${err.message} (tried ${url})`;
+      lastError = err.message;
     }
   }
   throw new Error(lastError);

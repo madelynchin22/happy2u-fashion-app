@@ -24,7 +24,7 @@ export default function CompetitorsPage() {
   const [crawling, setCrawling]       = useState<string | null>(null);
   const [crawlResult, setCrawlResult] = useState<Record<string, any>>({});
   const [modal, setModal]             = useState(false);
-  const [form, setForm]               = useState({ name: "", url: "", platform: "shopify", country: "MY" });
+  const [form, setForm]               = useState({ name: "", url: "", country: "MY" });
   const [saving, setSaving]           = useState(false);
   const [pageError, setPageError]     = useState("");
 
@@ -69,13 +69,13 @@ export default function CompetitorsPage() {
     try {
       const r = await fetch("/api/competitors", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ name: form.name, url: form.url, country: form.country }),
       });
       if (r.ok) {
         const c = await r.json();
         setCompetitors(prev => [...prev, c]);
         setModal(false);
-        setForm({ name: "", url: "", platform: "shopify", country: "MY" });
+        setForm({ name: "", url: "", country: "MY" });
       } else {
         const d = await r.json().catch(() => ({}));
         setPageError(d.error ?? "Failed to add competitor");
@@ -263,26 +263,19 @@ export default function CompetitorsPage() {
               <div>
                 <label className="label">Website URL *</label>
                 <input className="input" value={form.url} onChange={e => setForm(f=>({...f,url:e.target.value}))}
-                  placeholder="https://www.myballerine.com" />
-                <p className="text-xs text-gray-400 mt-1">Must be a <strong>Shopify</strong> store — the crawl uses <code>/products.json</code></p>
+                  placeholder="https://www.myballerina.com" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Platform</label>
-                  <select className="input" value={form.platform} onChange={e => setForm(f=>({...f,platform:e.target.value}))}>
-                    <option value="shopify">Shopify</option>
-                    <option value="woocommerce">WooCommerce</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Country</label>
-                  <select className="input" value={form.country} onChange={e => setForm(f=>({...f,country:e.target.value}))}>
-                    <option value="MY">Malaysia</option>
-                    <option value="TH">Thailand</option>
-                    <option value="SG">Singapore</option>
-                  </select>
-                </div>
+              <div>
+                <label className="label">Country</label>
+                <select className="input" value={form.country} onChange={e => setForm(f=>({...f,country:e.target.value}))}>
+                  <option value="MY">Malaysia</option>
+                  <option value="TH">Thailand</option>
+                  <option value="SG">Singapore</option>
+                  <option value="ID">Indonesia</option>
+                  <option value="CN">China</option>
+                  <option value="SG">Singapore</option>
+                  <option value="OTHER">Other</option>
+                </select>
               </div>
             </div>
             <div className="flex gap-3 mt-5">
