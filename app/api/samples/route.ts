@@ -23,17 +23,59 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const data = await req.json();
+    const data = await req.json();
 
-  // Auto-generate order number
-  const count = await prisma.sampleOrder.count();
-  const orderNumber = generateOrderNumber("SO", count + 1);
+    // Auto-generate order number using SR- prefix for Sample Request
+    const count = await prisma.sampleOrder.count();
+    const orderNumber = generateOrderNumber("SR", count + 1);
 
-  const sample = await prisma.sampleOrder.create({
-    data: { ...data, orderNumber, createdById: (session.user as any).id },
-  });
-  return NextResponse.json(sample, { status: 201 });
+    // Only pass known schema fields to avoid Prisma unknown field errors
+    const {
+      productName, brand, season, sampleSize, lastModel,
+      dateSent, deadline, manufacturerId, colorName, colorCode,
+      materialUpper, materialUpperRemark, materialUpperPhoto,
+      materialLining, materialLiningRemark, materialLiningPhoto,
+      materialMidsole, materialMidsoleRemark, materialMidsolePhoto,
+      materialOutsole, materialOutsoleRemark, materialOutsolePhoto,
+      hardware, hardwareRemark, hardwarePhoto,
+      heelSpec, heelSpecRemark, heelSpecPhoto,
+      platformSpec, platformSpecRemark, platformSpecPhoto,
+      logoSpec, logoSpecRemark, logoSpecPhoto,
+      photoSideUrl, photoBackUrl, photoFrontUrl, photoPlatformUrl, photoHeelUrl,
+      notesA, notesB, notesC, notesD, notesE,
+      generalNotes, amendmentNotes, designSource, ipNotes,
+    } = data;
+
+    const sample = await prisma.sampleOrder.create({
+      data: {
+        orderNumber,
+        createdById: (session.user as any).id,
+        productName: productName || "Sample",
+        brand, season, sampleSize, lastModel,
+        dateSent: dateSent ? new Date(dateSent) : null,
+        deadline: deadline ? new Date(deadline) : null,
+        manufacturerId,
+        colorName, colorCode,
+        materialUpper, materialUpperRemark, materialUpperPhoto,
+        materialLining, materialLiningRemark, materialLiningPhoto,
+        materialMidsole, materialMidsoleRemark, materialMidsolePhoto,
+        materialOutsole, materialOutsoleRemark, materialOutsolePhoto,
+        hardware, hardwareRemark, hardwarePhoto,
+        heelSpec, heelSpecRemark, heelSpecPhoto,
+        platformSpec, platformSpecRemark, platformSpecPhoto,
+        logoSpec, logoSpecRemark, logoSpecPhoto,
+        photoSideUrl, photoBackUrl, photoFrontUrl, photoPlatformUrl, photoHeelUrl,
+        notesA, notesB, notesC, notesD, notesE,
+        generalNotes, amendmentNotes, designSource, ipNotes,
+      },
+    });
+    return NextResponse.json(sample, { status: 201 });
+  } catch (err: any) {
+    console.error("POST /api/samples error:", err);
+    return NextResponse.json({ error: err?.message ?? "Server error" }, { status: 500 });
+  }
 }
