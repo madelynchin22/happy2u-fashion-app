@@ -205,7 +205,7 @@ export default function NewSamplePage() {
               </select>
               {BRAND_LOGOS[form.brand] && (
                 <img src={BRAND_LOGOS[form.brand]} alt={form.brand}
-                  className="h-8 object-contain flex-shrink-0 opacity-80" />
+                  className="h-16 object-contain flex-shrink-0" />
               )}
             </div>
           </div>
