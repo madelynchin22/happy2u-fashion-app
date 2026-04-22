@@ -1,6 +1,3 @@
 {
-  "/api/samples/route": "app/api/samples/route.js",
-  "/api/auth/[...nextauth]/route": "app/api/auth/[...nextauth]/route.js",
-  "/api/manufacturers/route": "app/api/manufacturers/route.js",
   "/(dashboard)/dashboard/samples/new/page": "app/(dashboard)/dashboard/samples/new/page.js"
 }

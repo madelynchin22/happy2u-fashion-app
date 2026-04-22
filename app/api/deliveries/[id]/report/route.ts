@@ -7,12 +7,12 @@ import { DiscrepancyReportPDF } from "@/lib/pdf/discrepancy-report";
 import { generateOrderNumber } from "@/lib/utils";
 import React from "react";
 
-export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const delivery = await prisma.delivery.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     include: {
       outlet: true,
       shipment: true,
@@ -22,14 +22,14 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
   if (!delivery) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Create or fetch existing report
-  let report = await prisma.discrepancyReport.findFirst({ where: { deliveryId: params.id } });
+  let report = await prisma.discrepancyReport.findFirst({ where: { deliveryId: (await params).id } });
   if (!report) {
     const count = await prisma.discrepancyReport.count();
     const flaggedItems = delivery.items.filter(i => i.isFlagged);
     report = await prisma.discrepancyReport.create({
       data: {
         reportNumber: generateOrderNumber("DR", count + 1),
-        deliveryId: params.id,
+        deliveryId: (await params).id,
         totalDiscrepancies: flaggedItems.length,
         status: "draft",
       },

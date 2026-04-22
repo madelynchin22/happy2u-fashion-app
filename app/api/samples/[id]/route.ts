@@ -4,12 +4,12 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { generateOrderNumber } from "@/lib/utils";
 
-export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const sample = await prisma.sampleOrder.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     include: {
       manufacturer: true,
       collection: true,
@@ -21,20 +21,20 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
   return NextResponse.json(sample);
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const data = await req.json();
-  const sample = await prisma.sampleOrder.update({ where: { id: params.id }, data });
+  const sample = await prisma.sampleOrder.update({ where: { id: (await params).id }, data });
   return NextResponse.json(sample);
 }
 
 // POST to /:id/amend creates a v2 sample
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const parent = await prisma.sampleOrder.findUnique({ where: { id: params.id } });
+  const parent = await prisma.sampleOrder.findUnique({ where: { id: (await params).id } });
   if (!parent) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const data = await req.json();

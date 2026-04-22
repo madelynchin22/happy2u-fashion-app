@@ -6,12 +6,12 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { PurchaseOrderPDF } from "@/lib/pdf/purchase-order";
 import React from "react";
 
-export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const po = await prisma.purchaseOrder.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     include: { manufacturer: true, items: true },
   });
   if (!po) return NextResponse.json({ error: "Not found" }, { status: 404 });

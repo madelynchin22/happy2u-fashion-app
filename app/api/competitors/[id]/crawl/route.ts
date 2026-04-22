@@ -26,11 +26,11 @@ async function fetchShopifyProducts(rawUrl: string) {
   return all;
 }
 
-export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const competitor = await prisma.competitor.findUnique({ where: { id: params.id } });
+  const competitor = await prisma.competitor.findUnique({ where: { id: (await params).id } });
   if (!competitor) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   let shopifyProducts: any[];
