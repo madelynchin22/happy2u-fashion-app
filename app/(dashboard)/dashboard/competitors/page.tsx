@@ -136,7 +136,7 @@ export default function CompetitorsPage() {
             {crawlResult[c.id] && (
               <div className={`mb-3 p-2 rounded-lg text-xs ${crawlResult[c.id].error ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
                 {crawlResult[c.id].error
-                  ? `⚠ ${crawlResult[c.id].error}`
+                  ? <span title={crawlResult[c.id].error}>⚠ {crawlResult[c.id].error.length > 120 ? crawlResult[c.id].error.slice(0,120) + "…" : crawlResult[c.id].error}</span>
                   : `✓ ${crawlResult[c.id].total} products · ${crawlResult[c.id].newProducts} new · ${crawlResult[c.id].restocks} restocks`}
               </div>
             )}
@@ -264,6 +264,7 @@ export default function CompetitorsPage() {
                 <label className="label">Website URL *</label>
                 <input className="input" value={form.url} onChange={e => setForm(f=>({...f,url:e.target.value}))}
                   placeholder="https://www.myballerine.com" />
+                <p className="text-xs text-gray-400 mt-1">Must be a <strong>Shopify</strong> store — the crawl uses <code>/products.json</code></p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
