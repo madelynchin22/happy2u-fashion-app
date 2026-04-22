@@ -208,54 +208,64 @@ async function scrapeBata(): Promise<ScrapedProduct[]> {
 }
 
 // ── Padini/Vincci scraper ─────────────────────────────────────────────────────
-// Magento store — extract product links, names (from URL slug) and prices
+// Magento store. Price is in jsonConfig JSON (~2000 chars after product link).
+// Name is in the img alt attribute right after the link. Image URL is also there.
 
 async function scrapePadini(rawUrl: string): Promise<ScrapedProduct[]> {
-  // Determine which brand page to crawl based on input URL
   const baseUrl = rawUrl.includes("padini.com") ? rawUrl.replace(/\/$/, "") : "https://www.padini.com/vincci";
   const seen = new Set<string>();
   const products: ScrapedProduct[] = [];
 
-  for (let p = 1; p <= 5; p++) {
+  for (let p = 1; p <= 10; p++) {
     try {
       const { text } = await fetchText(`${baseUrl}?p=${p}`);
-      const links = [...new Set(
-        [...text.matchAll(/href="(https:\/\/www\.padini\.com\/[^"]+\.html)"/g)].map(m => m[1])
-      )].filter(u => !u.includes("/brands/") && !u.includes("/deals/") && !u.includes(".com/en/"));
 
-      if (links.length === 0) break;
+      // Split into per-product blocks using <li class="item product product-item"> as separator
+      const blocks = text.split(/<li\s[^>]*class="[^"]*product-item[^"]*"/g).slice(1);
+      if (blocks.length === 0) break;
 
-      for (const url of links) {
-        const slug = url.split("/").pop()?.replace(".html", "") ?? "";
-        // SKU is the last hyphen-separated segment (e.g. vi20506586)
+      for (const block of blocks) {
+        // Product URL — must be a padini.com product page (not deals/brands)
+        const urlM = block.match(/href="(https:\/\/www\.padini\.com\/(?!deals|brands|en\/)[^"]+\.html)"/);
+        if (!urlM) continue;
+        const productUrl = urlM[1];
+
+        const slug = productUrl.split("/").pop()?.replace(".html", "") ?? "";
         const parts = slug.split("-");
-        const externalId = parts[parts.length - 1];
+        const externalId = parts[parts.length - 1]; // e.g. vi20506586
         if (seen.has(externalId)) continue;
         seen.add(externalId);
 
-        // Product name: remove brand prefix and SKU suffix from slug
-        const nameParts = parts.slice(1, parts.length - 1);
-        const name = nameParts.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(" ") || slug;
+        // Product name from img alt attribute (most reliable source)
+        const nameM = block.match(/alt="([^"]+)"/);
+        const name  = nameM?.[1] ?? parts.slice(1, -1).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(" ");
 
-        // Find the price and image in the surrounding HTML context
-        const idx = text.indexOf(url);
-        const ctx = text.slice(idx, idx + 800);
-        const priceM = ctx.match(/RM([\d.]+)/);
-        const imgM   = ctx.match(/src="(https:\/\/[^"]+\.(?:jpg|jpeg|webp|png)[^"]*)"/i);
+        // Image URL — first media/catalog image in the block
+        const imgM = block.match(/src="(https:\/\/www\.padini\.com\/media\/catalog\/product\/[^"]+\.jpg[^"]*)"/);
+
+        // Price from Magento jsonConfig: "finalPrice":{"amount":49}
+        const priceM = block.match(/"finalPrice"\s*:\s*\{"amount"\s*:\s*([\d.]+)\}/);
+        const price  = parseFloat(priceM?.[1] ?? "0") || 0;
+
+        // isAvailable: check if "salable" is non-empty or "Out of Stock" not present
+        const outOfStock = block.includes("Out of Stock") || block.includes("out-of-stock");
 
         products.push({
           externalId,
-          name: "Vincci " + name,
+          name,
           handle: slug,
-          productUrl: url,
+          productUrl,
           imageUrl: imgM?.[1] ?? "",
-          priceMin: parseFloat(priceM?.[1] ?? "0") || 0,
-          priceMax: parseFloat(priceM?.[1] ?? "0") || 0,
+          priceMin: price,
+          priceMax: price,
           colors: JSON.stringify([]),
           productType: "shoes",
-          isAvailable: true,
+          isAvailable: !outOfStock,
         });
       }
+
+      // If fewer blocks than expected, we've reached the last page
+      if (blocks.length < 20) break;
     } catch (err: any) {
       if (err.name !== "AbortError") console.error("Padini page error:", p, err.message);
       break;
