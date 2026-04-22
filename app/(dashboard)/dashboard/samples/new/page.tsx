@@ -172,6 +172,9 @@ export default function NewSamplePage() {
     if (res.ok) {
       const data = await res.json();
       router.push(`/dashboard/samples/${data.id}`);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(`Failed to save: ${err.error || res.statusText}`);
     }
   }
 
