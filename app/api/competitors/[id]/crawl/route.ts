@@ -3,126 +3,268 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-async function tryFetch(url: string, timeoutMs = 15000) {
+async function fetchText(url: string, timeoutMs = 15000): Promise<{ text: string; finalUrl: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        "User-Agent": UA,
-        "Accept": "application/json, text/html, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-      },
+      headers: { "User-Agent": UA, "Accept": "text/html,application/json,*/*", "Accept-Language": "en-MY,en;q=0.9" },
       redirect: "follow",
     });
-    return res;
+    return { text: await res.text(), finalUrl: res.url };
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Fallback: fetch via allorigins proxy to bypass Cloudflare/IP blocks */
-async function tryFetchViaProxy(url: string, timeoutMs = 20000): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-    const res = await fetch(proxyUrl, { signal: controller.signal });
-    if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
-    const wrapper = await res.json();
-    const body: string = wrapper.contents ?? "";
-    // Reconstruct a fake Response with the proxied body
-    return new Response(body, {
-      status: wrapper.status?.http_code ?? 200,
-      headers: { "content-type": "application/json" },
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+// ── Strategy detection ────────────────────────────────────────────────────────
+
+function detectStrategy(url: string): string {
+  const u = url.toLowerCase();
+  if (u.includes("charleskeith.com")) return "charleskeith";
+  if (u.includes("bata.com"))         return "bata";
+  if (u.includes("padini.com"))       return "padini";
+  return "shopify"; // default — will try /products.json
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function normaliseBase(rawUrl: string): string[] {
-  // Returns candidate base URLs to try, no trailing slash
   const withScheme = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
-  const base = withScheme.replace(/\/$/, "");
-  const withoutWww = base.replace("://www.", "://");
+  const base       = withScheme.replace(/\/$/, "");
+  const noWww      = base.replace("://www.", "://");
   const withWww    = base.includes("://www.") ? base : base.replace("://", "://www.");
-  // Deduplicate
-  return [...new Set([base, withWww, withoutWww])];
+  return [...new Set([base, withWww, noWww])];
 }
 
-async function fetchProductsJson(url: string): Promise<any> {
-  // 1. Try direct fetch first
-  try {
-    const res = await tryFetch(url);
-    if (res.ok) {
-      const ct = res.headers.get("content-type") ?? "";
-      if (ct.includes("json")) {
-        const json = await res.json();
-        if (json.products) return json;
-      } else {
-        const text = await res.text();
-        // Cloudflare or bot wall — fall through to proxy
-        if (!text.includes("Just a moment") && !text.includes("cf-browser-verification")) {
-          // Not Cloudflare — real non-JSON response, give up
-          throw new Error(`${url} returned HTML. The site may not support /products.json`);
-        }
-      }
-    }
-  } catch (err: any) {
-    if (err.name !== "AbortError" && !err.message.includes("fetch failed")) throw err;
-  }
+type ScrapedProduct = {
+  externalId: string; name: string; handle: string; productUrl: string;
+  imageUrl: string; priceMin: number; priceMax: number;
+  colors: string; productType: string; isAvailable: boolean;
+};
 
-  // 2. Fallback: route through allorigins proxy
-  try {
-    const res = await tryFetchViaProxy(url);
-    const text = await res.text();
-    if (!text.trim().startsWith("{") && !text.trim().startsWith("[")) {
-      throw new Error(`Proxy returned non-JSON from ${url}`);
-    }
-    const json = JSON.parse(text);
-    if (json.products) return json;
-  } catch (err: any) {
-    throw new Error(`Direct and proxy fetch both failed for ${url}: ${err.message}`);
-  }
+// ── Shopify scraper ───────────────────────────────────────────────────────────
 
-  throw new Error(`No products found at ${url}`);
-}
-
-async function fetchShopifyProducts(rawUrl: string) {
+async function scrapeShopify(rawUrl: string): Promise<{ products: ScrapedProduct[]; resolvedBase: string }> {
   const bases = normaliseBase(rawUrl);
-  let lastError = "Unknown error";
+  let lastError = "Could not connect";
 
   for (const base of bases) {
     const url = `${base}/products.json?limit=250&page=1`;
     try {
-      const json = await fetchProductsJson(url);
+      const { text } = await fetchText(url);
+      if (!text.trim().startsWith("{")) {
+        if (text.includes("Just a moment") || text.includes("cf-browser-verification")) {
+          throw new Error(`Cloudflare is blocking requests to ${base}`);
+        }
+        throw new Error(`${base} returned HTML — may not be a Shopify store`);
+      }
+      const json = JSON.parse(text);
+      if (!Array.isArray(json.products)) throw new Error(`${base}/products.json has no products array`);
 
       // Paginate
       const all: any[] = [...json.products];
       let page = 2;
       while (all.length % 250 === 0 && page <= 20) {
-        const pageUrl = `${base}/products.json?limit=250&page=${page}`;
-        try {
-          const pageJson = await fetchProductsJson(pageUrl);
-          const batch: any[] = pageJson.products ?? [];
-          if (!batch.length) break;
-          all.push(...batch);
-          page++;
-        } catch { break; }
+        const { text: pt } = await fetchText(`${base}/products.json?limit=250&page=${page}`);
+        const pj = JSON.parse(pt);
+        const batch: any[] = pj.products ?? [];
+        if (!batch.length) break;
+        all.push(...batch);
+        page++;
       }
 
-      return { products: all, resolvedBase: base };
+      const products: ScrapedProduct[] = all.map((p: any) => {
+        const variants: any[] = p.variants ?? [];
+        const prices = variants.map((v: any) => parseFloat(v.price)).filter(Boolean);
+        const colorOpt = (p.options ?? []).find((o: any) => /color|colour|warna/i.test(o.name));
+        return {
+          externalId: String(p.id),
+          name: p.title,
+          handle: p.handle ?? "",
+          productUrl: `${base}/products/${p.handle}`,
+          imageUrl: p.images?.[0]?.src ?? "",
+          priceMin: prices.length ? Math.min(...prices) : 0,
+          priceMax: prices.length ? Math.max(...prices) : 0,
+          colors: JSON.stringify(colorOpt?.values ?? []),
+          productType: p.product_type ?? "",
+          isAvailable: variants.some((v: any) => v.available !== false),
+        };
+      });
+      return { products, resolvedBase: base };
     } catch (err: any) {
-      lastError = err.message;
+      if (err.name === "AbortError") { lastError = `Timed out on ${url}`; continue; }
+      throw err;
     }
   }
   throw new Error(lastError);
 }
+
+// ── Charles & Keith scraper ───────────────────────────────────────────────────
+// Uses data-ga analytics attributes which embed product name/price/category as JSON
+
+async function scrapeCharlesKeith(): Promise<ScrapedProduct[]> {
+  const crawlPages = [
+    "https://www.charleskeith.com/my/new-arrivals/shoes",
+    "https://www.charleskeith.com/my/new-arrivals/bags",
+    "https://www.charleskeith.com/my/shoes",
+    "https://www.charleskeith.com/my/bags",
+  ];
+  const seen = new Set<string>();
+  const products: ScrapedProduct[] = [];
+
+  for (const page of crawlPages) {
+    try {
+      const { text } = await fetchText(page);
+      const gaMatches = [...text.matchAll(/data-ga="(\{[^"]*(?:&quot;[^"]*)*}?)"/g)];
+      // Also extract pid→image mapping
+      const pidImgMap: Record<string, string> = {};
+      const pidImgMatches = [...text.matchAll(/data-pid="(CK[^"]+)"[\s\S]{0,800}?src="(https:\/\/www\.charleskeith\.com\/on\/demandware\.static[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/g)];
+      for (const m of pidImgMatches) {
+        if (!pidImgMap[m[1]]) pidImgMap[m[1]] = m[2];
+      }
+
+      for (const m of gaMatches) {
+        const raw = m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+        try {
+          const d = JSON.parse(raw);
+          if (!d.item_id) continue;
+          if (seen.has(d.item_id)) continue;
+          seen.add(d.item_id);
+          const price = parseFloat(d.price) || 0;
+          const baseId = d.item_id.replace(/_[A-Z]+$/, "").toLowerCase();
+          products.push({
+            externalId: d.item_id,
+            name: d.item_name ?? d.item_id,
+            handle: d.item_id.toLowerCase(),
+            productUrl: `https://www.charleskeith.com/my/products/${baseId}`,
+            imageUrl: pidImgMap[d.item_id] ?? "",
+            priceMin: price, priceMax: price,
+            colors: JSON.stringify([]),
+            productType: d.item_category2 ?? d.item_category ?? "shoes",
+            isAvailable: true,
+          });
+        } catch {}
+      }
+    } catch (err: any) {
+      if (err.name !== "AbortError") console.error("CK page error:", page, err.message);
+    }
+  }
+  return products;
+}
+
+// ── Bata scraper ──────────────────────────────────────────────────────────────
+// Uses Constructor.io data-cnstrc-* attributes embedded in the listing HTML
+
+async function scrapeBata(): Promise<ScrapedProduct[]> {
+  const crawlPages = [
+    "https://www.bata.com/my/women/shoes/",
+    "https://www.bata.com/my/women/sandals/",
+    "https://www.bata.com/my/women/sneakers/",
+    "https://www.bata.com/my/new-arrivals/",
+  ];
+  const seen = new Set<string>();
+  const products: ScrapedProduct[] = [];
+
+  for (const page of crawlPages) {
+    try {
+      const { text } = await fetchText(page);
+      const itemMatches = [...text.matchAll(
+        /data-cnstrc-item-variation-id="([^"]+)"[\s\S]{0,100}?data-cnstrc-item-price="([^"]+)"/g
+      )];
+
+      for (const m of itemMatches) {
+        const sku = m[1];
+        const price = parseFloat(m[2]) || 0;
+        if (seen.has(sku)) continue;
+        seen.add(sku);
+
+        const idx = text.indexOf(`data-cnstrc-item-variation-id="${sku}"`);
+        const ctx = text.slice(Math.max(0, idx - 50), idx + 1200);
+        const urlM  = ctx.match(/href="(\/my\/[^"]+\.html)"/);
+        const nameM = ctx.match(/aria-label="([^"]+)"/);
+        const imgM  = ctx.match(/src="(https:\/\/www\.bata\.com\/dw\/image[^"]+)"/);
+
+        products.push({
+          externalId: sku,
+          name: nameM?.[1] ?? sku,
+          handle: sku.toLowerCase(),
+          productUrl: urlM ? `https://www.bata.com${urlM[1]}` : page,
+          imageUrl: imgM?.[1] ?? "",
+          priceMin: price, priceMax: price,
+          colors: JSON.stringify([]),
+          productType: "shoes",
+          isAvailable: true,
+        });
+      }
+    } catch (err: any) {
+      if (err.name !== "AbortError") console.error("Bata page error:", page, err.message);
+    }
+  }
+  return products;
+}
+
+// ── Padini/Vincci scraper ─────────────────────────────────────────────────────
+// Magento store — extract product links, names (from URL slug) and prices
+
+async function scrapePadini(rawUrl: string): Promise<ScrapedProduct[]> {
+  // Determine which brand page to crawl based on input URL
+  const baseUrl = rawUrl.includes("padini.com") ? rawUrl.replace(/\/$/, "") : "https://www.padini.com/vincci";
+  const seen = new Set<string>();
+  const products: ScrapedProduct[] = [];
+
+  for (let p = 1; p <= 5; p++) {
+    try {
+      const { text } = await fetchText(`${baseUrl}?p=${p}`);
+      const links = [...new Set(
+        [...text.matchAll(/href="(https:\/\/www\.padini\.com\/[^"]+\.html)"/g)].map(m => m[1])
+      )].filter(u => !u.includes("/brands/") && !u.includes("/deals/") && !u.includes(".com/en/"));
+
+      if (links.length === 0) break;
+
+      for (const url of links) {
+        const slug = url.split("/").pop()?.replace(".html", "") ?? "";
+        // SKU is the last hyphen-separated segment (e.g. vi20506586)
+        const parts = slug.split("-");
+        const externalId = parts[parts.length - 1];
+        if (seen.has(externalId)) continue;
+        seen.add(externalId);
+
+        // Product name: remove brand prefix and SKU suffix from slug
+        const nameParts = parts.slice(1, parts.length - 1);
+        const name = nameParts.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(" ") || slug;
+
+        // Find the price and image in the surrounding HTML context
+        const idx = text.indexOf(url);
+        const ctx = text.slice(idx, idx + 800);
+        const priceM = ctx.match(/RM([\d.]+)/);
+        const imgM   = ctx.match(/src="(https:\/\/[^"]+\.(?:jpg|jpeg|webp|png)[^"]*)"/i);
+
+        products.push({
+          externalId,
+          name: "Vincci " + name,
+          handle: slug,
+          productUrl: url,
+          imageUrl: imgM?.[1] ?? "",
+          priceMin: parseFloat(priceM?.[1] ?? "0") || 0,
+          priceMax: parseFloat(priceM?.[1] ?? "0") || 0,
+          colors: JSON.stringify([]),
+          productType: "shoes",
+          isAvailable: true,
+        });
+      }
+    } catch (err: any) {
+      if (err.name !== "AbortError") console.error("Padini page error:", p, err.message);
+      break;
+    }
+  }
+  return products;
+}
+
+// ── Main POST handler ─────────────────────────────────────────────────────────
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -131,63 +273,48 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const competitor = await prisma.competitor.findUnique({ where: { id: (await params).id } });
   if (!competitor) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  let shopifyProducts: any[];
-  let resolvedBase: string;
+  let scrapedProducts: ScrapedProduct[];
+  let resolvedBase = competitor.url;
+
   try {
-    const result = await fetchShopifyProducts(competitor.url);
-    shopifyProducts = result.products;
-    resolvedBase = result.resolvedBase;
+    const strategy = detectStrategy(competitor.url);
+    if (strategy === "charleskeith") {
+      scrapedProducts = await scrapeCharlesKeith();
+    } else if (strategy === "bata") {
+      scrapedProducts = await scrapeBata();
+    } else if (strategy === "padini") {
+      scrapedProducts = await scrapePadini(competitor.url);
+    } else {
+      const result = await scrapeShopify(competitor.url);
+      scrapedProducts = result.products;
+      resolvedBase = result.resolvedBase;
+    }
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 
-  if (!shopifyProducts.length) {
-    return NextResponse.json({
-      error: `Connected successfully but got 0 products from ${competitor.url}/products.json. The catalogue may be empty or hidden.`,
-    }, { status: 422 });
+  if (!scrapedProducts.length) {
+    return NextResponse.json({ error: `Connected but found 0 products from ${competitor.url}` }, { status: 422 });
   }
 
-  let newCount = 0;
-  let restockCount = 0;
+  let newCount = 0, restockCount = 0;
   const seenIds: string[] = [];
 
-  for (const p of shopifyProducts) {
-    const variants: any[] = p.variants ?? [];
-    const prices = variants.map((v: any) => parseFloat(v.price)).filter((n: number) => n > 0);
-    const available = variants.some((v: any) => v.available !== false);
-    const colorOpt = (p.options ?? []).find((o: any) => /color|colour|warna/i.test(o.name));
-
-    const externalId = String(p.id);
-    seenIds.push(externalId);
-
-    const product = {
-      name: p.title as string,
-      handle: (p.handle ?? "") as string,
-      productUrl: `${resolvedBase}/products/${p.handle}`,
-      imageUrl: (p.images?.[0]?.src ?? "") as string,
-      priceMin: prices.length ? Math.min(...prices) : 0,
-      priceMax: prices.length ? Math.max(...prices) : 0,
-      colors: JSON.stringify(colorOpt?.values ?? []),
-      productType: (p.product_type ?? "") as string,
-      isAvailable: available,
-    };
-
+  for (const p of scrapedProducts) {
+    seenIds.push(p.externalId);
     const existing = await prisma.competitorProduct.findUnique({
-      where: { competitorId_externalId: { competitorId: competitor.id, externalId } },
+      where: { competitorId_externalId: { competitorId: competitor.id, externalId: p.externalId } },
     });
-
     if (!existing) {
-      await prisma.competitorProduct.create({
-        data: { competitorId: competitor.id, externalId, ...product, isNew: true, wasRestocked: false },
-      });
+      await prisma.competitorProduct.create({ data: { competitorId: competitor.id, ...p, isNew: true, wasRestocked: false } });
       newCount++;
     } else {
-      const isRestock = !existing.isAvailable && available;
+      const isRestock = !existing.isAvailable && p.isAvailable;
       await prisma.competitorProduct.update({
         where: { id: existing.id },
         data: {
-          ...product,
-          imageUrl: product.imageUrl || existing.imageUrl,
+          ...p,
+          imageUrl: p.imageUrl || existing.imageUrl,
           wasRestocked: isRestock || existing.wasRestocked,
           restockedAt: isRestock ? new Date() : existing.restockedAt,
           lastSeenAt: new Date(),
@@ -205,10 +332,6 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     });
   }
 
-  await prisma.competitor.update({
-    where: { id: competitor.id },
-    data: { lastCrawledAt: new Date() },
-  });
-
-  return NextResponse.json({ total: shopifyProducts.length, newProducts: newCount, restocks: restockCount });
+  await prisma.competitor.update({ where: { id: competitor.id }, data: { lastCrawledAt: new Date() } });
+  return NextResponse.json({ total: scrapedProducts.length, newProducts: newCount, restocks: restockCount });
 }
