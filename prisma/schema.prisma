@@ -1,0 +1,553 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── AUTH ────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  password      String
+  role          String    @default("viewer") // admin | buyer | operation | finance | warehouse
+  outletId      String?
+  outlet        Outlet?   @relation(fields: [outletId], references: [id])
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  createdSamples     SampleOrder[]    @relation("CreatedBy")
+  createdPOs         PurchaseOrder[]  @relation("POCreatedBy")
+  createdShipments   Shipment[]
+  createdDeliveries  Delivery[]
+}
+
+// ─── OUTLETS ─────────────────────────────────────────────────────────────────
+
+model Outlet {
+  id          String  @id @default(cuid())
+  name        String
+  marking     String  @unique   // e.g. JN75-H2UHQ, TH-BFZPV-A
+  country     String  @default("MY")  // MY | TH
+  address     String?
+  isHQ        Boolean @default(false)
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+
+  users             User[]
+  packingListItems  PackingListItem[]
+  shipments         Shipment[]
+  deliveries        Delivery[]
+}
+
+// ─── EXCHANGE RATE ───────────────────────────────────────────────────────────
+
+model ExchangeRate {
+  id        String   @id @default(cuid())
+  fromCcy   String   // RMB
+  toCcy     String   // RM
+  rate      Float    // e.g. 0.62
+  setBy     String?
+  setAt     DateTime @default(now())
+}
+
+// ─── MANUFACTURERS ───────────────────────────────────────────────────────────
+
+model Manufacturer {
+  id            String  @id @default(cuid())
+  name          String
+  nameEn        String?
+  contactName   String?
+  contactPhone  String?
+  contactWechat String?
+  contactEmail  String?
+  country       String  @default("CN")
+  moq           Int?
+  leadTimeDays  Int?
+  paymentTerms  String?
+  materials     String?   // comma-separated: "PU,genuine leather,suede"
+  notes         String?
+  isActive      Boolean @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sampleOrders    SampleOrder[]
+  purchaseOrders  PurchaseOrder[]
+  productLibrary  ProductLibrary[]
+}
+
+// ─── PRODUCT MATERIALS LIBRARY ───────────────────────────────────────────────
+
+model Material {
+  id            String  @id @default(cuid())
+  name          String
+  materialType  String  // upper | lining | midsole | outsole | hardware | insole | heel | platform | sole
+  colorCode     String?
+  colorName     String?
+  supplier      String?
+  photoUrl      String?
+  swatchUrl     String?
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+// ─── COLLECTIONS ─────────────────────────────────────────────────────────────
+
+model Collection {
+  id          String  @id @default(cuid())
+  name        String
+  season      String
+  status      String  @default("draft") // draft | active | closed
+  createdAt   DateTime @default(now())
+
+  sampleOrders   SampleOrder[]
+  purchaseOrders PurchaseOrder[]
+}
+
+// ─── SAMPLE ORDERS ───────────────────────────────────────────────────────────
+
+model SampleOrder {
+  id              String  @id @default(cuid())
+  orderNumber     String  @unique  // SO-2026-001
+  version         Int     @default(1)
+  parentId        String?
+  parent          SampleOrder?  @relation("SampleVersions", fields: [parentId], references: [id])
+  children        SampleOrder[] @relation("SampleVersions")
+
+  // Header
+  productName     String
+  productNumber   String?
+  brand           String  @default("Happy2U")
+  season          String?
+  sampleSize      String? // EU 38
+  lastModel       String?
+  dateSent        DateTime?
+  deadline        DateTime?
+
+  // Relations
+  manufacturerId  String
+  manufacturer    Manufacturer @relation(fields: [manufacturerId], references: [id])
+  collectionId    String?
+  collection      Collection?  @relation(fields: [collectionId], references: [id])
+
+  // Status
+  status          String  @default("draft") // draft | sent | received | approved | rejected
+  sentAt          DateTime?
+  receivedAt      DateTime?
+
+  // Product spec fields matching your PO format
+  supplierSku     String?
+  h2uSku          String?
+  colorName       String?
+  colorCode       String?
+  materialUpper   String?
+  materialLining  String?
+  materialMidsole String?
+  materialOutsole String?
+  hardware        String?
+  logoSpec        String?
+  heelSpec        String?
+  platformSpec    String?
+
+  // Material remarks & photos per spec row
+  materialUpperRemark    String?
+  materialUpperPhoto     String?
+  materialLiningRemark   String?
+  materialLiningPhoto    String?
+  materialMidsoleRemark  String?
+  materialMidsolePhoto   String?
+  materialOutsoleRemark  String?
+  materialOutsolePhoto   String?
+  hardwareRemark         String?
+  hardwarePhoto          String?
+  logoSpecRemark         String?
+  logoSpecPhoto          String?
+  heelSpecRemark         String?
+  heelSpecPhoto          String?
+  platformSpecRemark     String?
+  platformSpecPhoto      String?
+
+  // Multi-view photos (stored as JSON array of URLs)
+  photoSideUrl    String?
+  photoBackUrl    String?
+  photoFrontUrl   String?
+  photoPlatformUrl String?
+  photoHeelUrl    String?
+  photoExtraUrls  String?  // JSON array
+
+  // Notes per view
+  notesA          String?  // Side view notes
+  notesB          String?  // Back view notes
+  notesC          String?  // Front view notes
+  notesD          String?  // Platform notes
+  notesE          String?  // Heel notes
+  generalNotes    String?
+
+  // IP protection
+  designSource    String?  // "in-house" | "reference" | "licensed"
+  ipNotes         String?  // document design origin
+
+  // Amendment notes (for v2+)
+  amendmentNotes  String?
+
+  // Received stage fields
+  receivedRemark  String?
+  productCostRmb  Float?
+  productCostRm   Float?
+
+  // Cost & pricing (kept for PO stage)
+  costRmb         Float?
+  costRm          Float?
+  suggestedRetailLow  Float?
+  suggestedRetailHigh Float?
+
+  createdById     String?
+  createdBy       User?    @relation("CreatedBy", fields: [createdById], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  poItems         PurchaseOrderItem[]
+}
+
+// ─── PURCHASE ORDERS ─────────────────────────────────────────────────────────
+
+model PurchaseOrder {
+  id              String  @id @default(cuid())
+  poNumber        String  @unique  // JUN-04, JUN-05...
+  date            DateTime @default(now())
+
+  manufacturerId  String
+  manufacturer    Manufacturer @relation(fields: [manufacturerId], references: [id])
+  collectionId    String?
+  collection      Collection?  @relation(fields: [collectionId], references: [id])
+
+  brand           String  @default("MS SWEET")
+  deliveryDate    DateTime?
+  currency        String  @default("RMB")
+
+  // Totals (calculated)
+  totalPairs      Int     @default(0)
+  totalPrice      Float   @default(0)
+
+  status          String  @default("draft") // draft | sent | confirmed | in_production | shipped | closed
+  notes           String?
+  pdfUrl          String?
+
+  createdById     String?
+  createdBy       User?   @relation("POCreatedBy", fields: [createdById], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items           PurchaseOrderItem[]
+  packingLists    PackingList[]
+  shipmentItems   ShipmentItem[]
+}
+
+model PurchaseOrderItem {
+  id              String  @id @default(cuid())
+  poId            String
+  po              PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+
+  sampleOrderId   String?
+  sampleOrder     SampleOrder? @relation(fields: [sampleOrderId], references: [id])
+
+  supplierSku     String?
+  h2uSku          String?
+  colorName       String?
+  colorCode       String?
+  brand           String?
+  materialUpper   String?
+  materialLining  String?
+  materialMidsole String?
+  materialOutsole String?
+  hardware        String?
+  logoSpec        String?
+  remark          String?
+  photoUrl        String?
+  deliveryDate    DateTime?
+
+  // Size run EU 36-42
+  qty36           Int     @default(0)
+  qty37           Int     @default(0)
+  qty38           Int     @default(0)
+  qty39           Int     @default(0)
+  qty40           Int     @default(0)
+  qty41           Int     @default(0)
+  qty42           Int     @default(0)
+  totalPairs      Int     @default(0)
+
+  discountPrice   Float?
+  lineTotal       Float?
+
+  packingListItems PackingListItem[]
+  deliveryItems    DeliveryItem[]
+}
+
+// ─── PACKING LIST ─────────────────────────────────────────────────────────────
+
+model PackingList {
+  id          String  @id @default(cuid())
+  poId        String
+  po          PurchaseOrder @relation(fields: [poId], references: [id])
+  totalPairs  Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       PackingListItem[]
+}
+
+model PackingListItem {
+  id              String  @id @default(cuid())
+  packingListId   String
+  packingList     PackingList @relation(fields: [packingListId], references: [id], onDelete: Cascade)
+
+  poItemId        String
+  poItem          PurchaseOrderItem @relation(fields: [poItemId], references: [id])
+
+  outletId        String
+  outlet          Outlet  @relation(fields: [outletId], references: [id])
+
+  // Size breakdown for this outlet
+  qty36           Int     @default(0)
+  qty37           Int     @default(0)
+  qty38           Int     @default(0)
+  qty39           Int     @default(0)
+  qty40           Int     @default(0)
+  qty41           Int     @default(0)
+  qty42           Int     @default(0)
+  totalPairs      Int     @default(0)
+
+  deliveryDate    DateTime?
+  remark          String?
+}
+
+// ─── SHIPMENTS ────────────────────────────────────────────────────────────────
+
+model Shipment {
+  id              String  @id @default(cuid())
+  shipmentNumber  String  @unique  // SH-2026-001
+  containerNumber String?
+  vesselName      String?
+  blNumber        String?
+  portOrigin      String?
+  portDestination String?
+  shipDate        DateTime?
+  estimatedArrival DateTime?
+  actualArrival   DateTime?
+  destinationId   String?
+  destination     Outlet?  @relation(fields: [destinationId], references: [id])
+  status          String   @default("preparing") // preparing | in_transit | customs | arrived | delivered
+  notes           String?
+
+  createdById     String?
+  createdBy       User?    @relation(fields: [createdById], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items           ShipmentItem[]
+  deliveries      Delivery[]
+  events          ShipmentEvent[]
+}
+
+model ShipmentItem {
+  id          String  @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  poId        String
+  po          PurchaseOrder @relation(fields: [poId], references: [id])
+  totalPairs  Int     @default(0)
+  notes       String?
+}
+
+model ShipmentEvent {
+  id          String  @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  eventType   String
+  eventDate   DateTime
+  location    String?
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+// ─── DELIVERIES & QC ──────────────────────────────────────────────────────────
+
+model Delivery {
+  id          String  @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment @relation(fields: [shipmentId], references: [id])
+  outletId    String
+  outlet      Outlet  @relation(fields: [outletId], references: [id])
+  receivedAt  DateTime?
+  status      String  @default("pending") // pending | partial | complete | disputed
+  notes       String?
+
+  createdById  String?
+  createdBy    User?    @relation(fields: [createdById], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items        DeliveryItem[]
+  reports      DiscrepancyReport[]
+}
+
+model DeliveryItem {
+  id                  String  @id @default(cuid())
+  deliveryId          String
+  delivery            Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  poItemId            String
+  poItem              PurchaseOrderItem @relation(fields: [poItemId], references: [id])
+
+  supplierSku         String?
+  h2uSku              String?
+  colorName           String?
+
+  expectedQty         Int     @default(0)
+  receivedQty         Int     @default(0)
+  // discrepancyQty is computed: expectedQty - receivedQty
+
+  discrepancyType     String? // shortage | overage | damaged | wrong_item
+  damageDescription   String?
+  photoUrls           String? // JSON array
+  isFlagged           Boolean @default(false)
+}
+
+model DiscrepancyReport {
+  id                  String  @id @default(cuid())
+  reportNumber        String  @unique  // DR-2026-001
+  deliveryId          String
+  delivery            Delivery @relation(fields: [deliveryId], references: [id])
+  totalDiscrepancies  Int     @default(0)
+  estimatedLossRm     Float?
+  status              String  @default("draft") // draft | sent | acknowledged | resolved
+  pdfUrl              String?
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// ─── TRENDS ──────────────────────────────────────────────────────────────────
+
+model TrendItem {
+  id            String  @id @default(cuid())
+  category      String  // color | material | accessory | silhouette | style
+  title         String
+  description   String?
+  imageUrl      String?
+  sourceUrl     String?
+  sourceName    String?
+  market        String?  // MY | TH | GLOBAL
+  brand         String?  // e.g. Zara, H&M, Charles & Keith
+  colorName     String?  // primary color
+  priceMin      Float?   // MYR
+  priceMax      Float?   // MYR
+  rankPosition  Int?
+  salesData     String?
+  trendScore    Float?
+  season        String?
+  scrapedAt     DateTime @default(now())
+  validUntil    DateTime?
+  isManual      Boolean  @default(false)
+}
+
+// ─── COMPETITOR MONITOR ───────────────────────────────────────────────────────
+
+model Competitor {
+  id            String   @id @default(cuid())
+  name          String
+  url           String
+  platform      String   @default("shopify")  // shopify | woocommerce | custom
+  country       String   @default("MY")
+  isActive      Boolean  @default(true)
+  lastCrawledAt DateTime?
+  createdAt     DateTime @default(now())
+  products      CompetitorProduct[]
+}
+
+model CompetitorProduct {
+  id            String   @id @default(cuid())
+  competitorId  String
+  competitor    Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  externalId    String
+  name          String
+  handle        String?
+  productUrl    String?
+  imageUrl      String?
+  priceMin      Float?
+  priceMax      Float?
+  colors        String?   // JSON: ["Black","Nude","Pink"]
+  productType   String?
+  isAvailable   Boolean  @default(true)
+  isNew         Boolean  @default(true)
+  wasRestocked  Boolean  @default(false)
+  restockedAt   DateTime?
+  firstSeenAt   DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([competitorId, externalId])
+}
+
+// ─── BEST SELLERS ─────────────────────────────────────────────────────────────
+
+model BestSeller {
+  id            String  @id @default(cuid())
+  productName   String
+  supplierSku   String?
+  h2uSku        String?
+  category      String  // heels | flats | sandals | boots | bags | accessories | shoe_care | keychain | merchandiser
+  season        String?
+  colorName     String?
+  material      String?
+  unitsSold     Int?
+  revenueRm     Float?
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+// ─── PRODUCT LIBRARY ──────────────────────────────────────────────────────────
+
+model ProductLibrary {
+  id              String   @id @default(cuid())
+  libNumber       String   @unique  // PL-2026-001
+  productName     String
+  h2uSku          String?
+  supplierSku     String?
+  brand           String?
+  category        String?  // heels | flats | sandals | boots | bags | accessories
+  colorName       String?
+  colorCode       String?
+  season          String?
+
+  // Material specs
+  materialUpper   String?
+  materialLining  String?
+  materialMidsole String?
+  materialOutsole String?
+  hardware        String?
+  logoSpec        String?
+  heelSpec        String?
+  platformSpec    String?
+
+  // Cost & pricing (cost from sample received, selling price from PO)
+  costRmb         Float?
+  costRm          Float?
+  sellingPrice    Float?
+
+  // Photos (JSON array of URLs)
+  imageUrls       String?
+
+  notes           String?
+
+  // Source tracking
+  sampleOrderId   String?
+  manufacturerId  String?
+  manufacturer    Manufacturer? @relation(fields: [manufacturerId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
