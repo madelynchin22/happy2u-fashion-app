@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,14 +24,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#f1e8de" }}>
       <div className="bg-white rounded-2xl shadow-lg w-full max-w-md p-10">
         <div className="flex flex-col items-center mb-8">
-          <Image
-            src="/logo.png"
-            alt="Happy2U"
-            width={180}
-            height={72}
-            className="object-contain mb-3"
-            priority
-          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Happy2U" className="h-14 object-contain mb-2" />
           <p className="text-gray-500 text-sm">Business Management System</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
