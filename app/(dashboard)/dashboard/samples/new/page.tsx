@@ -7,6 +7,15 @@ type Manufacturer = { id: string; name: string };
 
 const BRANDS = ["Happy2U", "Blissfit", "Latex", "Cloudfeet", "Bunny"];
 
+// Brand → logo file mapping (place files in /public/logos/)
+const BRAND_LOGOS: Record<string, string> = {
+  "Happy2U":  "/logos/happy2u.png",
+  "Blissfit": "/logos/blissfit.png",
+  "Latex":    "/logos/latex.png",
+  "Cloudfeet":"/logos/cloudfeet.png",
+  "Bunny":    "/logos/bunny.png",
+};
+
 function today() { return new Date().toISOString().split("T")[0]; }
 function plusDays(n: number) {
   const d = new Date(); d.setDate(d.getDate() + n);
@@ -81,7 +90,7 @@ export default function NewSamplePage() {
 
   const [form, setForm] = useState({
     brand: "Happy2U",
-    sampleSize: "38", lastModel: "", dateSent: today(), deadline: plusDays(14),
+    sampleSize: "37", lastModel: "", dateSent: today(), deadline: plusDays(14),
     manufacturerId: "", colorName: "", colorCode: "",
     materialUpper: "", materialUpper_remark: "", materialUpper_photo: "",
     materialLining: "", materialLining_remark: "", materialLining_photo: "",
@@ -190,9 +199,15 @@ export default function NewSamplePage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Brand</label>
-            <select className="input" value={form.brand} onChange={e => set("brand", e.target.value)}>
-              {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
+            <div className="flex items-center gap-3">
+              <select className="input" value={form.brand} onChange={e => set("brand", e.target.value)}>
+                {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+              {BRAND_LOGOS[form.brand] && (
+                <img src={BRAND_LOGOS[form.brand]} alt={form.brand}
+                  className="h-8 object-contain flex-shrink-0 opacity-80" />
+              )}
+            </div>
           </div>
           <div>
             <label className="label">Manufacturer *</label>

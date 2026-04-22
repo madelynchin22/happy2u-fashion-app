@@ -34,6 +34,17 @@ async function main() {
   });
   console.log("✅ Outlet:", hq.name);
 
+  // Create manufacturers (sorted A-Z)
+  const manufacturerNames = [
+    "Anna", "AOPIYA", "Li De", "Ms Sweet", "Nancy",
+    "Sophia", "Tina Bella", "Tina Real Shoes", "Yuki & Maggie",
+  ];
+  for (const name of manufacturerNames) {
+    const existing = await prisma.manufacturer.findFirst({ where: { name } });
+    if (!existing) await prisma.manufacturer.create({ data: { name, country: "CN" } });
+  }
+  console.log("✅ Manufacturers seeded:", manufacturerNames.join(", "));
+
   // Default exchange rate
   await prisma.exchangeRate.create({
     data: { fromCcy: "RMB", toCcy: "RM", rate: 0.62, setBy: admin.id },
