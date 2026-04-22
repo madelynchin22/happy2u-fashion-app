@@ -48,9 +48,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       "notesA", "notesB", "notesC", "notesD", "notesE",
       "generalNotes", "amendmentNotes", "designSource", "ipNotes",
       "receivedRemark",
+      "trackingNumber", "courierCompany",
     ];
 
-    const dateFields = ["dateSent", "deadline", "sentAt", "receivedAt"];
+    const dateFields = ["dateSent", "deadline", "sentAt", "receivedAt", "shipOutDate"];
     const numFields  = ["productCostRmb", "productCostRm", "costRmb", "costRm", "suggestedRetailLow", "suggestedRetailHigh"];
 
     for (const f of strFields) {

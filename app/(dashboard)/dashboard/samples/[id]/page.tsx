@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatDate, rmbToRm } from "@/lib/utils";
-import { FileDown, GitBranch, PackageCheck, Send, ChevronLeft, Save, Upload, X, Edit2 } from "lucide-react";
+import { FileDown, GitBranch, PackageCheck, Send, ChevronLeft, Save, Upload, X, Edit2, Truck } from "lucide-react";
 
 const BRANDS = ["Happy2U", "Blissfit", "Latex", "Cloudfeet", "Bunny"];
 const MANUFACTURERS_CACHE: { id: string; name: string }[] = [];
@@ -12,6 +12,7 @@ type Sample = {
   id: string; orderNumber: string; productName: string; productNumber?: string;
   version: number; status: string; brand: string; season?: string; sampleSize?: string;
   lastModel?: string; dateSent?: string; deadline?: string; receivedAt?: string;
+  trackingNumber?: string; courierCompany?: string; shipOutDate?: string;
   supplierSku?: string; h2uSku?: string; colorName?: string; colorCode?: string;
   materialUpper?: string; materialLining?: string; materialMidsole?: string;
   materialOutsole?: string; hardware?: string; logoSpec?: string;
@@ -87,8 +88,29 @@ function PhotoCell({ url, onChange }: { url?: string; onChange: (u: string) => v
   );
 }
 
-function ViewPhotoCell({ label, photo, notes, onUpload }: {
-  label: string; photo?: string; notes?: string; onUpload: (url: string) => void;
+// Auto-detect courier from tracking number patterns
+function detectCourier(tracking: string): string {
+  const t = tracking.trim().toUpperCase();
+  if (!t) return "";
+  if (/^SF\d{12}$/.test(t) || /^(75|76|77|78)\d{10}$/.test(t)) return "SF Express (顺丰)";
+  if (/^JT\d{12,15}$/.test(t) || /^60\d{11,13}$/.test(t)) return "J&T Express";
+  if (/^YT\d{14,16}$/.test(t)) return "YunExpress";
+  if (/^XX\d{13}$/.test(t) || /^4PX/.test(t)) return "4PX";
+  if (/^1Z[A-Z0-9]{16}$/.test(t)) return "UPS";
+  if (/^[0-9]{12}$/.test(t)) return "FedEx";
+  if (/^[0-9]{15}$/.test(t)) return "FedEx";
+  if (/^[0-9]{20,22}$/.test(t)) return "FedEx / USPS";
+  if (/^[ERC][A-Z]{1}\d{9}CN$/i.test(t)) return "EMS / China Post";
+  if (/^NV(SG|MY|TH|PH|ID|VN)/i.test(t)) return "Ninja Van";
+  if (/^POSLAJU/i.test(t) || /^EF\d{9}MY$/i.test(t)) return "Poslaju";
+  if (/^GD\d{10,14}$/.test(t)) return "DHL eCommerce";
+  if (/^[0-9]{10}$/.test(t)) return "DHL Express";
+  if (/^61\d{17}$/.test(t) || /^73\d{17}$/.test(t)) return "Australia Post";
+  return "";
+}
+
+function ViewPhotoCell({ label, photo, notes, onUpload, editable = true }: {
+  label: string; photo?: string; notes?: string; onUpload: (url: string) => void; editable?: boolean;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -100,25 +122,31 @@ function ViewPhotoCell({ label, photo, notes, onUpload }: {
   }
   return (
     <div className="text-center">
-      <div className="bg-gray-100 rounded-lg aspect-square flex items-center justify-center mb-2 overflow-hidden relative group cursor-pointer"
-        onClick={() => !photo && ref.current?.click()}>
+      <div className={`bg-gray-100 rounded-lg aspect-square flex items-center justify-center mb-2 overflow-hidden relative ${editable ? "group cursor-pointer" : ""}`}
+        onClick={() => editable && !photo && ref.current?.click()}>
         {photo ? (
           <>
             <img src={photo} alt={label} className="w-full h-full object-cover" />
-            <button onClick={e => { e.stopPropagation(); ref.current?.click(); }}
-              className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition-opacity">
-              <Upload size={14} className="mr-1" /> Replace
-            </button>
+            {editable && (
+              <button onClick={e => { e.stopPropagation(); ref.current?.click(); }}
+                className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition-opacity">
+                <Upload size={14} className="mr-1" /> Replace
+              </button>
+            )}
           </>
         ) : uploading ? (
           <span className="text-gray-400 text-xs">Uploading…</span>
-        ) : (
+        ) : editable ? (
           <div className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500 transition-colors">
             <Upload size={16} /><span className="text-[10px]">{label}</span>
           </div>
+        ) : (
+          <span className="text-gray-300 text-xs">No photo</span>
         )}
-        <input ref={ref} type="file" accept="image/*" className="hidden"
-          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+        {editable && (
+          <input ref={ref} type="file" accept="image/*" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+        )}
       </div>
       <p className="text-xs font-medium text-gray-700">{label}</p>
       {notes && <p className="text-xs text-gray-500 mt-1">{notes}</p>}
@@ -153,6 +181,12 @@ export default function SampleDetailPage() {
   const [saving, setSaving]   = useState(false);
   const [amending, setAmending]     = useState(false);
   const [amendNotes, setAmendNotes] = useState("");
+
+  // Shipping modal
+  const [shippingModal, setShippingModal] = useState(false);
+  const [shipForm, setShipForm] = useState({
+    trackingNumber: "", courierCompany: "", shipOutDate: new Date().toISOString().split("T")[0],
+  });
   const [rmbRate] = useState<number>(() => parseFloat(localStorage.getItem("rmbRate") ?? "0.62"));
 
   // Edit state (used when draft)
@@ -251,6 +285,28 @@ export default function SampleDetailPage() {
     fetch(`/api/samples/${id}`).then(r => r.json()).then(setSample);
   }
 
+  async function confirmShipping() {
+    if (!shipForm.trackingNumber.trim()) { alert("Please enter a tracking number."); return; }
+    setSaving(true);
+    const res = await fetch(`/api/samples/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status: "shipping",
+        trackingNumber: shipForm.trackingNumber.trim(),
+        courierCompany: shipForm.courierCompany.trim() || null,
+        shipOutDate: shipForm.shipOutDate || null,
+      }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      const updated = await res.json();
+      setSample(updated);
+      setShippingModal(false);
+    } else {
+      alert("Failed to update shipping info.");
+    }
+  }
+
   async function saveReceived() {
     setRcvSaving(true);
     const costRmb = parseFloat(rcvEdit.productCostRmb) || null;
@@ -322,8 +378,8 @@ export default function SampleDetailPage() {
             </button>
           )}
           {sample.status === "submitted" && (
-            <button onClick={() => updateStatus("shipping")} className="btn-primary flex items-center gap-2">
-              <PackageCheck size={14} /> Mark Shipping
+            <button onClick={() => setShippingModal(true)} className="btn-primary flex items-center gap-2">
+              <Truck size={14} /> Mark Shipping
             </button>
           )}
           {sample.status === "shipping" && (
@@ -357,6 +413,21 @@ export default function SampleDetailPage() {
       {isDraft && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
           <Edit2 size={14} /> This sample order is in <strong>Draft</strong> — all fields are editable. Click <strong>Save Changes</strong> when done.
+        </div>
+      )}
+
+      {/* Shipping info card */}
+      {sample.trackingNumber && (
+        <div className="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 flex items-start gap-3">
+          <Truck size={16} className="text-purple-500 mt-0.5 flex-shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-purple-800 mb-1">Shipment Info</p>
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-purple-700">
+              <span><span className="text-purple-500">Tracking:</span> <strong>{sample.trackingNumber}</strong></span>
+              {sample.courierCompany && <span><span className="text-purple-500">Courier:</span> {sample.courierCompany}</span>}
+              {sample.shipOutDate && <span><span className="text-purple-500">Ship-out date:</span> {formatDate(sample.shipOutDate)}</span>}
+            </div>
+          </div>
         </div>
       )}
 
@@ -527,6 +598,7 @@ export default function SampleDetailPage() {
       {/* Product Views & Notes */}
       <div className="card p-5">
         <h2 className="font-semibold text-gray-900 mb-4">Product Views & Notes</h2>
+        {!isDraft && <p className="text-xs text-gray-400 mb-3">Read-only after submission.</p>}
         <div className="grid grid-cols-5 gap-4">
           {VIEW_ROWS.map(v => (
             <div key={v.label} className="text-center">
@@ -534,9 +606,9 @@ export default function SampleDetailPage() {
                 label={v.label}
                 photo={isDraft ? edit[v.photoKey] : (sample as any)[v.photoKey]}
                 notes={isDraft ? edit[v.notesKey] : (sample as any)[v.notesKey]}
+                editable={isDraft}
                 onUpload={url => {
                   setE(v.photoKey, url);
-                  // Auto-save photo immediately even in draft
                   fetch(`/api/samples/${id}`, {
                     method: "PATCH", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ [v.photoKey]: url }),
@@ -622,6 +694,49 @@ export default function SampleDetailPage() {
           <button onClick={saveReceived} disabled={rcvSaving} className="btn-secondary flex items-center gap-2">
             <Save size={14} /> {rcvSaving ? "Saving…" : "Save Received Info"}
           </button>
+        </div>
+      )}
+
+      {/* Shipping modal */}
+      {shippingModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="card w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Truck size={18} /> Mark as Shipping</h2>
+              <button onClick={() => setShippingModal(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="label">Tracking Number *</label>
+                <input className="input" value={shipForm.trackingNumber} placeholder="e.g. SF123456789012"
+                  onChange={e => {
+                    const val = e.target.value;
+                    const detected = detectCourier(val);
+                    setShipForm(p => ({ ...p, trackingNumber: val, courierCompany: detected || p.courierCompany }));
+                  }} />
+                {shipForm.trackingNumber && detectCourier(shipForm.trackingNumber) && (
+                  <p className="text-xs text-green-600 mt-1">✓ Auto-detected: {detectCourier(shipForm.trackingNumber)}</p>
+                )}
+              </div>
+              <div>
+                <label className="label">Courier Company</label>
+                <input className="input" value={shipForm.courierCompany} placeholder="e.g. SF Express"
+                  onChange={e => setShipForm(p => ({ ...p, courierCompany: e.target.value }))} />
+                <p className="text-xs text-gray-400 mt-1">Auto-filled from tracking number. You can override it.</p>
+              </div>
+              <div>
+                <label className="label">Ship-out Date</label>
+                <input className="input" type="date" value={shipForm.shipOutDate}
+                  onChange={e => setShipForm(p => ({ ...p, shipOutDate: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShippingModal(false)} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={confirmShipping} disabled={saving} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                <Truck size={14} /> {saving ? "Saving…" : "Confirm Shipping"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

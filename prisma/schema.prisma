@@ -139,6 +139,11 @@ model SampleOrder {
   sentAt          DateTime?
   receivedAt      DateTime?
 
+  // Shipping tracking
+  trackingNumber  String?
+  courierCompany  String?
+  shipOutDate     DateTime?
+
   // Product spec fields matching your PO format
   supplierSku     String?
   h2uSku          String?
