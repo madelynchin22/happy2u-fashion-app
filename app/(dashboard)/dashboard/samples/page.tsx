@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Plus, Search } from "lucide-react";
 
 type Sample = {
@@ -42,6 +43,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function SamplesPage() {
+  const router = useRouter();
   const [samples, setSamples] = useState<Sample[]>([]);
   const [filter, setFilter]   = useState("all");
   const [search, setSearch]   = useState("");
@@ -107,11 +109,11 @@ export default function SamplesPage() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {filtered.map(s => (
-              <tr key={s.id} className="hover:bg-gray-50 transition-colors cursor-pointer">
+              <tr key={s.id} onClick={() => router.push(`/dashboard/samples/${s.id}`)} className="hover:bg-gray-50 transition-colors cursor-pointer">
                 <td className="px-4 py-3">
-                  <Link href={`/dashboard/samples/${s.id}`} className="font-semibold text-brand-700 hover:underline font-mono text-xs">
+                  <span className="font-semibold text-brand-700 font-mono text-xs">
                     {s.orderNumber}
-                  </Link>
+                  </span>
                 </td>
                 <td className="px-4 py-3">
                   <div className="font-medium text-gray-900">{s.brand || "-"}</div>

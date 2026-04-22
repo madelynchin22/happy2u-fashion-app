@@ -60,6 +60,53 @@ function PhotoThumb({ url, onChange }: { url?: string; onChange?: (u: string) =>
   );
 }
 
+function ViewPhotoCell({ label, photo, notes, onUpload }: {
+  label: string; photo?: string; notes?: string;
+  onUpload: (url: string) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFile(file: File) {
+    setUploading(true);
+    const url = await uploadFile(file);
+    onUpload(url);
+    setUploading(false);
+  }
+
+  return (
+    <div className="text-center">
+      <div
+        className="bg-gray-100 rounded-lg aspect-square flex items-center justify-center mb-2 overflow-hidden relative group cursor-pointer"
+        onClick={() => !photo && ref.current?.click()}
+      >
+        {photo ? (
+          <>
+            <img src={photo} alt={label} className="w-full h-full object-cover" />
+            <button
+              onClick={e => { e.stopPropagation(); ref.current?.click(); }}
+              className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition-opacity"
+            >
+              <Upload size={16} className="mr-1" /> Replace
+            </button>
+          </>
+        ) : uploading ? (
+          <span className="text-gray-400 text-xs">Uploading…</span>
+        ) : (
+          <div className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500 transition-colors">
+            <Upload size={16} />
+            <span className="text-[10px]">{label}</span>
+          </div>
+        )}
+        <input ref={ref} type="file" accept="image/*" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+      </div>
+      <p className="text-xs font-medium text-gray-700">{label}</p>
+      {notes && <p className="text-xs text-gray-500 mt-1">{notes}</p>}
+    </div>
+  );
+}
+
 export default function SampleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router  = useRouter();
@@ -180,24 +227,45 @@ export default function SampleDetailPage() {
           <p className="text-gray-500 text-sm mt-1">{sample.productName} · {sample.manufacturer.name}</p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
-          {sample.status === "draft" && (
-            <button onClick={() => updateStatus("sent")} className="btn-primary flex items-center gap-2">
-              <Send size={14} /> Mark Sent
+          {(sample.status === "draft") && (
+            <button onClick={() => updateStatus("submitted")} className="btn-primary flex items-center gap-2">
+              <Send size={14} /> Mark Submitted
             </button>
           )}
+          {sample.status === "submitted" && (
+            <button onClick={() => updateStatus("shipping")} className="btn-secondary flex items-center gap-2">
+              <PackageCheck size={14} /> Mark Shipping
+            </button>
+          )}
+          {sample.status === "shipping" && (
+            <button onClick={() => updateStatus("delivered")} className="btn-secondary flex items-center gap-2">
+              <PackageCheck size={14} /> Mark Delivered
+            </button>
+          )}
+          {sample.status === "delivered" && (
+            <>
+              <button onClick={() => setAmending(true)} className="btn-secondary flex items-center gap-2">
+                <GitBranch size={14} /> Create Amendment (v{sample.version + 1})
+              </button>
+              <button onClick={() => updateStatus("ready")} className="btn-primary flex items-center gap-2">
+                Mark Ready to Use
+              </button>
+            </>
+          )}
+          {sample.status === "ready" && (
+            <button onClick={() => updateStatus("used")} className="btn-primary flex items-center gap-2">
+              Mark Used
+            </button>
+          )}
+          {/* Legacy status support */}
           {sample.status === "sent" && (
-            <button onClick={() => updateStatus("received")} className="btn-secondary flex items-center gap-2">
-              <PackageCheck size={14} /> Mark Received
+            <button onClick={() => updateStatus("shipping")} className="btn-secondary flex items-center gap-2">
+              <PackageCheck size={14} /> Mark Shipping
             </button>
           )}
           {sample.status === "received" && (
-            <button onClick={() => setAmending(true)} className="btn-secondary flex items-center gap-2">
-              <GitBranch size={14} /> Create Amendment (v{sample.version + 1})
-            </button>
-          )}
-          {sample.status === "received" && (
-            <button onClick={() => updateStatus("approved")} className="btn-primary flex items-center gap-2">
-              Approve Sample
+            <button onClick={() => updateStatus("ready")} className="btn-primary flex items-center gap-2">
+              Mark Ready to Use
             </button>
           )}
           <button onClick={downloadPdf} className="btn-secondary flex items-center gap-2">
@@ -308,16 +376,24 @@ export default function SampleDetailPage() {
         <h2 className="font-semibold text-gray-900 mb-3">Product Views & Notes</h2>
         <div className="grid grid-cols-5 gap-3">
           {viewNotes.map(v => (
-            <div key={v.label} className="text-center">
-              <div className="bg-gray-100 rounded-lg aspect-square flex items-center justify-center mb-2 overflow-hidden">
-                {v.photo
-                  ? <img src={v.photo} alt={v.label} className="w-full h-full object-cover" />
-                  : <span className="text-gray-400 text-xs">{v.label}</span>
-                }
-              </div>
-              <p className="text-xs font-medium text-gray-700">{v.label}</p>
-              {v.notes && <p className="text-xs text-gray-500 mt-1">{v.notes}</p>}
-            </div>
+            <ViewPhotoCell
+              key={v.label}
+              label={v.label}
+              photo={v.photo}
+              notes={v.notes}
+              onUpload={async (url) => {
+                const fieldMap: Record<string, string> = {
+                  "A — Side": "photoSideUrl", "B — Back": "photoBackUrl",
+                  "C — Front": "photoFrontUrl", "D — Platform": "photoPlatformUrl",
+                  "E — Heel": "photoHeelUrl",
+                };
+                await fetch(`/api/samples/${id}`, {
+                  method: "PATCH", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ [fieldMap[v.label]]: url }),
+                });
+                fetch(`/api/samples/${id}`).then(r => r.json()).then(setSample);
+              }}
+            />
           ))}
         </div>
       </div>
@@ -346,7 +422,7 @@ export default function SampleDetailPage() {
       )}
 
       {/* ── After Receiving Sample section ───────────────────────── */}
-      {["received","approved","rejected"].includes(sample.status) && (
+      {["delivered","ready","used","rejected","received","approved"].includes(sample.status) && (
         <div className="card p-5 border-l-4 border-blue-400">
           <h2 className="font-semibold text-gray-900 mb-1">After Receiving Sample</h2>
           <p className="text-xs text-gray-400 mb-4">Fill in after the physical sample arrives from supplier.</p>
@@ -388,7 +464,7 @@ export default function SampleDetailPage() {
       )}
 
       {/* ── Purchase Order stage — H2U SKU ───────────────────────── */}
-      {["approved"].includes(sample.status) && (
+      {["ready","used","approved"].includes(sample.status) && (
         <div className="card p-5 border-l-4 border-green-400">
           <h2 className="font-semibold text-gray-900 mb-1">Purchase Order Stage</h2>
           <p className="text-xs text-gray-400 mb-4">Assign the H2U SKU when placing a Purchase Order for this product.</p>
