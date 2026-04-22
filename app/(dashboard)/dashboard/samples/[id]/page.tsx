@@ -3,7 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatDate, rmbToRm } from "@/lib/utils";
-import { FileDown, GitBranch, PackageCheck, Send, ChevronLeft, Save, Upload, X } from "lucide-react";
+import { FileDown, GitBranch, PackageCheck, Send, ChevronLeft, Save, Upload, X, Edit2 } from "lucide-react";
+
+const BRANDS = ["Happy2U", "Blissfit", "Latex", "Cloudfeet", "Bunny"];
+const MANUFACTURERS_CACHE: { id: string; name: string }[] = [];
 
 type Sample = {
   id: string; orderNumber: string; productName: string; productNumber?: string;
@@ -25,9 +28,24 @@ type Sample = {
   costRmb?: number; costRm?: number; suggestedRetailLow?: number; suggestedRetailHigh?: number;
   photoSideUrl?: string; photoBackUrl?: string; photoFrontUrl?: string;
   photoPlatformUrl?: string; photoHeelUrl?: string;
-  manufacturer: { name: string; contactName?: string; contactWechat?: string };
+  manufacturer: { id: string; name: string; contactName?: string; contactWechat?: string };
   parent?: { id: string; orderNumber: string; version: number };
   children: { id: string; orderNumber: string; version: number; status: string }[];
+};
+
+const STATUS_STYLE: Record<string, string> = {
+  draft: "bg-gray-100 text-gray-600",
+  submitted: "bg-blue-100 text-blue-700",
+  shipping: "bg-purple-100 text-purple-700",
+  delivered: "bg-yellow-100 text-yellow-700",
+  ready: "bg-green-100 text-green-700",
+  used: "bg-brand-100 text-brand-700",
+  rejected: "bg-red-100 text-red-600",
+};
+const STATUS_LABEL: Record<string, string> = {
+  draft: "Draft", submitted: "Submitted", sent: "Submitted",
+  shipping: "Shipping", delivered: "Delivered", received: "Delivered",
+  ready: "Ready", approved: "Ready", used: "Used", rejected: "Rejected",
 };
 
 async function uploadFile(file: File): Promise<string> {
@@ -38,64 +56,65 @@ async function uploadFile(file: File): Promise<string> {
   return d.url ?? "";
 }
 
-function PhotoThumb({ url, onChange }: { url?: string; onChange?: (u: string) => void }) {
+function PhotoCell({ url, onChange }: { url?: string; onChange: (u: string) => void }) {
   const ref = useRef<HTMLInputElement>(null);
-  if (!url && !onChange) return null;
+  const [uploading, setUploading] = useState(false);
+  async function handleFile(file: File) {
+    setUploading(true);
+    const u = await uploadFile(file);
+    onChange(u);
+    setUploading(false);
+  }
   return (
-    <div className="flex items-center gap-2">
-      {url
-        ? <a href={url} target="_blank" rel="noopener noreferrer">
-            <img src={url} alt="" className="w-12 h-12 object-cover rounded-lg border border-gray-200 hover:opacity-80" />
-          </a>
-        : onChange
-          ? <button onClick={() => ref.current?.click()}
-              className="w-12 h-12 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-400 hover:border-brand-300 hover:text-brand-400">
-              <Upload size={14} />
-            </button>
-          : null
-      }
-      {onChange && <input ref={ref} type="file" accept="image/*" className="hidden"
-        onChange={async e => { const f = e.target.files?.[0]; if (f) { const u = await uploadFile(f); onChange(u); } e.target.value = ""; }} />}
+    <div className="relative group">
+      {url ? (
+        <>
+          <img src={url} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200" />
+          <button onClick={() => ref.current?.click()}
+            className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] rounded-lg transition-opacity">
+            <Upload size={12} />
+          </button>
+        </>
+      ) : (
+        <button onClick={() => ref.current?.click()}
+          className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-200 hover:border-brand-400 flex flex-col items-center justify-center gap-0.5 text-gray-400 hover:text-brand-500 transition-colors">
+          {uploading ? <span className="text-[9px]">…</span> : <><Upload size={12} /><span className="text-[9px]">Photo</span></>}
+        </button>
+      )}
+      <input ref={ref} type="file" accept="image/*" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
     </div>
   );
 }
 
 function ViewPhotoCell({ label, photo, notes, onUpload }: {
-  label: string; photo?: string; notes?: string;
-  onUpload: (url: string) => void;
+  label: string; photo?: string; notes?: string; onUpload: (url: string) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-
   async function handleFile(file: File) {
     setUploading(true);
     const url = await uploadFile(file);
     onUpload(url);
     setUploading(false);
   }
-
   return (
     <div className="text-center">
-      <div
-        className="bg-gray-100 rounded-lg aspect-square flex items-center justify-center mb-2 overflow-hidden relative group cursor-pointer"
-        onClick={() => !photo && ref.current?.click()}
-      >
+      <div className="bg-gray-100 rounded-lg aspect-square flex items-center justify-center mb-2 overflow-hidden relative group cursor-pointer"
+        onClick={() => !photo && ref.current?.click()}>
         {photo ? (
           <>
             <img src={photo} alt={label} className="w-full h-full object-cover" />
-            <button
-              onClick={e => { e.stopPropagation(); ref.current?.click(); }}
-              className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition-opacity"
-            >
-              <Upload size={16} className="mr-1" /> Replace
+            <button onClick={e => { e.stopPropagation(); ref.current?.click(); }}
+              className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition-opacity">
+              <Upload size={14} className="mr-1" /> Replace
             </button>
           </>
         ) : uploading ? (
           <span className="text-gray-400 text-xs">Uploading…</span>
         ) : (
           <div className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500 transition-colors">
-            <Upload size={16} />
-            <span className="text-[10px]">{label}</span>
+            <Upload size={16} /><span className="text-[10px]">{label}</span>
           </div>
         )}
         <input ref={ref} type="file" accept="image/*" className="hidden"
@@ -107,34 +126,130 @@ function ViewPhotoCell({ label, photo, notes, onUpload }: {
   );
 }
 
+const MATERIAL_ROWS = [
+  { key: "materialUpper",   label: "Upper (鞋面)" },
+  { key: "materialLining",  label: "Lining (内里)" },
+  { key: "materialMidsole", label: "Midsole (中底)" },
+  { key: "materialOutsole", label: "Outsole (大底)" },
+  { key: "hardware",        label: "Hardware (五金)" },
+  { key: "heelSpec",        label: "Heel (鞋跟)" },
+  { key: "platformSpec",    label: "Platform (台面)" },
+  { key: "logoSpec",        label: "Logo" },
+] as const;
+
+const VIEW_ROWS = [
+  { label: "A — Side",     photoKey: "photoSideUrl",     notesKey: "notesA" },
+  { label: "B — Back",     photoKey: "photoBackUrl",     notesKey: "notesB" },
+  { label: "C — Front",    photoKey: "photoFrontUrl",    notesKey: "notesC" },
+  { label: "D — Platform", photoKey: "photoPlatformUrl", notesKey: "notesD" },
+  { label: "E — Heel",     photoKey: "photoHeelUrl",     notesKey: "notesE" },
+] as const;
+
 export default function SampleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router  = useRouter();
-  const [sample, setSample]         = useState<Sample | null>(null);
+  const [sample, setSample]   = useState<Sample | null>(null);
+  const [mfrs, setMfrs]       = useState<{ id: string; name: string }[]>([]);
+  const [saving, setSaving]   = useState(false);
   const [amending, setAmending]     = useState(false);
   const [amendNotes, setAmendNotes] = useState("");
-  const [saving, setSaving]         = useState(false);
-  const [rmbRate]                   = useState<number>(() => parseFloat(localStorage.getItem("rmbRate") ?? "0.62"));
+  const [rmbRate] = useState<number>(() => parseFloat(localStorage.getItem("rmbRate") ?? "0.62"));
 
-  // Received stage edit state
+  // Edit state (used when draft)
+  const [edit, setEdit] = useState<Record<string, string>>({});
+
+  // Received stage
   const [rcvEdit, setRcvEdit] = useState({ supplierSku: "", productCostRmb: "", receivedRemark: "" });
   const [rcvSaving, setRcvSaving] = useState(false);
 
-  // PO stage edit state
-  const [poEdit, setPoEdit] = useState({ h2uSku: "" });
-  const [poSaving, setPoSaving] = useState(false);
-
   useEffect(() => {
+    fetch("/api/manufacturers").then(r => r.json()).then(setMfrs);
     fetch(`/api/samples/${id}`).then(r => r.json()).then((s: Sample) => {
       setSample(s);
+      // Populate edit state from sample
+      const e: Record<string, string> = {};
+      e.brand = s.brand ?? "Happy2U";
+      e.sampleSize = s.sampleSize ?? "37";
+      e.lastModel = s.lastModel ?? "";
+      e.dateSent = s.dateSent ? s.dateSent.split("T")[0] : "";
+      e.deadline = s.deadline ? s.deadline.split("T")[0] : "";
+      e.manufacturerId = s.manufacturer?.id ?? "";
+      e.colorName = s.colorName ?? "";
+      e.colorCode = s.colorCode ?? "";
+      for (const row of MATERIAL_ROWS) {
+        e[row.key] = (s as any)[row.key] ?? "";
+        e[`${row.key}Remark`] = (s as any)[`${row.key}Remark`] ?? "";
+        e[`${row.key}Photo`] = (s as any)[`${row.key}Photo`] ?? "";
+      }
+      for (const v of VIEW_ROWS) {
+        e[v.photoKey] = (s as any)[v.photoKey] ?? "";
+        e[v.notesKey] = (s as any)[v.notesKey] ?? "";
+      }
+      e.generalNotes = s.generalNotes ?? "";
+      e.amendmentNotes = s.amendmentNotes ?? "";
+      e.designSource = s.designSource ?? "in-house";
+      e.ipNotes = s.ipNotes ?? "";
+      setEdit(e);
       setRcvEdit({
         supplierSku: s.supplierSku ?? "",
         productCostRmb: s.productCostRmb ? String(s.productCostRmb) : "",
         receivedRemark: s.receivedRemark ?? "",
       });
-      setPoEdit({ h2uSku: s.h2uSku ?? "" });
     });
   }, [id]);
+
+  function setE(field: string, value: string) {
+    setEdit(prev => ({ ...prev, [field]: value }));
+  }
+
+  async function saveDraft() {
+    setSaving(true);
+    const payload: Record<string, any> = {
+      brand: edit.brand,
+      sampleSize: edit.sampleSize,
+      lastModel: edit.lastModel || null,
+      dateSent: edit.dateSent || null,
+      deadline: edit.deadline || null,
+      manufacturerId: edit.manufacturerId || undefined,
+      colorName: edit.colorName || null,
+      colorCode: edit.colorCode || null,
+      productName: [edit.brand, edit.colorName].filter(Boolean).join(" ") || "Sample",
+    };
+    for (const row of MATERIAL_ROWS) {
+      payload[row.key] = edit[row.key] || null;
+      payload[`${row.key}Remark`] = edit[`${row.key}Remark`] || null;
+      payload[`${row.key}Photo`] = edit[`${row.key}Photo`] || null;
+    }
+    for (const v of VIEW_ROWS) {
+      payload[v.photoKey] = edit[v.photoKey] || null;
+      payload[v.notesKey] = edit[v.notesKey] || null;
+    }
+    payload.generalNotes = edit.generalNotes || null;
+    payload.amendmentNotes = edit.amendmentNotes || null;
+    payload.designSource = edit.designSource || null;
+    payload.ipNotes = edit.ipNotes || null;
+
+    const res = await fetch(`/api/samples/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setSaving(false);
+    if (res.ok) {
+      const updated = await res.json();
+      setSample(updated);
+      alert("Saved successfully!");
+    } else {
+      alert("Failed to save changes.");
+    }
+  }
+
+  async function updateStatus(status: string) {
+    await fetch(`/api/samples/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    fetch(`/api/samples/${id}`).then(r => r.json()).then(setSample);
+  }
 
   async function saveReceived() {
     setRcvSaving(true);
@@ -145,24 +260,6 @@ export default function SampleDetailPage() {
       body: JSON.stringify({ supplierSku: rcvEdit.supplierSku || null, productCostRmb: costRmb, productCostRm: costRm, receivedRemark: rcvEdit.receivedRemark || null }),
     });
     setRcvSaving(false);
-    fetch(`/api/samples/${id}`).then(r => r.json()).then(setSample);
-  }
-
-  async function savePOStage() {
-    setPoSaving(true);
-    await fetch(`/api/samples/${id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ h2uSku: poEdit.h2uSku || null }),
-    });
-    setPoSaving(false);
-    fetch(`/api/samples/${id}`).then(r => r.json()).then(setSample);
-  }
-
-  async function updateStatus(status: string) {
-    await fetch(`/api/samples/${id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, ...(status === "sent" ? { sentAt: new Date().toISOString() } : {}), ...(status === "received" ? { receivedAt: new Date().toISOString() } : {}) }),
-    });
     fetch(`/api/samples/${id}`).then(r => r.json()).then(setSample);
   }
 
@@ -192,24 +289,9 @@ export default function SampleDetailPage() {
 
   if (!sample) return <div className="py-20 text-center text-gray-400">Loading…</div>;
 
-  const specRows = [
-    { label: "Upper (鞋面)",   value: sample.materialUpper },
-    { label: "Lining (内里)",  value: sample.materialLining },
-    { label: "Midsole (中底)", value: sample.materialMidsole },
-    { label: "Outsole (大底)", value: sample.materialOutsole },
-    { label: "Hardware (五金)", value: sample.hardware },
-    { label: "Heel (鞋跟)",   value: sample.heelSpec },
-    { label: "Platform",       value: sample.platformSpec },
-    { label: "Logo",           value: sample.logoSpec },
-  ];
-
-  const viewNotes = [
-    { label: "A — Side",     notes: sample.notesA, photo: sample.photoSideUrl },
-    { label: "B — Back",     notes: sample.notesB, photo: sample.photoBackUrl },
-    { label: "C — Front",    notes: sample.notesC, photo: sample.photoFrontUrl },
-    { label: "D — Platform", notes: sample.notesD, photo: sample.photoPlatformUrl },
-    { label: "E — Heel",     notes: sample.notesE, photo: sample.photoHeelUrl },
-  ];
+  const isDraft = sample.status === "draft";
+  const statusStyle = STATUS_STYLE[sample.status] ?? "bg-gray-100 text-gray-600";
+  const statusLabel = STATUS_LABEL[sample.status] ?? sample.status;
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -221,31 +303,38 @@ export default function SampleDetailPage() {
           </Link>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">{sample.orderNumber}</h1>
-            <span className={`badge-${sample.status}`}>{sample.status}</span>
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusStyle}`}>
+              {statusLabel}
+            </span>
             <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">v{sample.version}</span>
           </div>
           <p className="text-gray-500 text-sm mt-1">{sample.productName} · {sample.manufacturer.name}</p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
-          {(sample.status === "draft") && (
-            <button onClick={() => updateStatus("submitted")} className="btn-primary flex items-center gap-2">
+          {isDraft && (
+            <button onClick={saveDraft} disabled={saving} className="btn-primary flex items-center gap-2">
+              <Save size={14} /> {saving ? "Saving…" : "Save Changes"}
+            </button>
+          )}
+          {isDraft && (
+            <button onClick={() => updateStatus("submitted")} className="btn-secondary flex items-center gap-2">
               <Send size={14} /> Mark Submitted
             </button>
           )}
           {sample.status === "submitted" && (
-            <button onClick={() => updateStatus("shipping")} className="btn-secondary flex items-center gap-2">
+            <button onClick={() => updateStatus("shipping")} className="btn-primary flex items-center gap-2">
               <PackageCheck size={14} /> Mark Shipping
             </button>
           )}
           {sample.status === "shipping" && (
-            <button onClick={() => updateStatus("delivered")} className="btn-secondary flex items-center gap-2">
+            <button onClick={() => updateStatus("delivered")} className="btn-primary flex items-center gap-2">
               <PackageCheck size={14} /> Mark Delivered
             </button>
           )}
           {sample.status === "delivered" && (
             <>
               <button onClick={() => setAmending(true)} className="btn-secondary flex items-center gap-2">
-                <GitBranch size={14} /> Create Amendment (v{sample.version + 1})
+                <GitBranch size={14} /> Create Amendment
               </button>
               <button onClick={() => updateStatus("ready")} className="btn-primary flex items-center gap-2">
                 Mark Ready to Use
@@ -257,22 +346,19 @@ export default function SampleDetailPage() {
               Mark Used
             </button>
           )}
-          {/* Legacy status support */}
-          {sample.status === "sent" && (
-            <button onClick={() => updateStatus("shipping")} className="btn-secondary flex items-center gap-2">
-              <PackageCheck size={14} /> Mark Shipping
+          {!isDraft && (
+            <button onClick={downloadPdf} className="btn-secondary flex items-center gap-2">
+              <FileDown size={14} /> Download PDF
             </button>
           )}
-          {sample.status === "received" && (
-            <button onClick={() => updateStatus("ready")} className="btn-primary flex items-center gap-2">
-              Mark Ready to Use
-            </button>
-          )}
-          <button onClick={downloadPdf} className="btn-secondary flex items-center gap-2">
-            <FileDown size={14} /> Download PDF
-          </button>
         </div>
       </div>
+
+      {isDraft && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
+          <Edit2 size={14} /> This sample order is in <strong>Draft</strong> — all fields are editable. Click <strong>Save Changes</strong> when done.
+        </div>
+      )}
 
       {/* Version chain */}
       {(sample.parent || sample.children.length > 0) && (
@@ -299,129 +385,206 @@ export default function SampleDetailPage() {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        {/* Left: Spec Sheet */}
+        {/* Left: Header Info */}
         <div className="space-y-5">
-          {/* Header Info */}
           <div className="card p-5">
-            <h2 className="font-semibold text-gray-900 mb-3">Spec Sheet Header</h2>
-            <dl className="space-y-2 text-sm">
-              {[
-                ["Product Number", sample.productNumber],
-                ["Brand", sample.brand],
-                ["Season", sample.season],
-                ["Sample Size", sample.sampleSize ? `EU ${sample.sampleSize}` : "-"],
-                ["Last Model", sample.lastModel],
-                ["Date Sent", formatDate(sample.dateSent)],
-                ["Deadline", formatDate(sample.deadline)],
-                ["Manufacturer", sample.manufacturer.name],
-              ].map(([k, v]) => (
-                <div key={k} className="flex justify-between">
-                  <dt className="text-gray-500">{k}</dt>
-                  <dd className="font-medium text-gray-900 text-right">{v || "-"}</dd>
-                </div>
-              ))}
-            </dl>
+            <h2 className="font-semibold text-gray-900 mb-4">Product Information</h2>
+            <div className="space-y-3">
+              {/* Brand */}
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Brand</span>
+                {isDraft
+                  ? <select className="input w-40 text-sm" value={edit.brand} onChange={e => setE("brand", e.target.value)}>
+                      {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  : <span className="text-sm font-medium text-gray-900">{sample.brand || "-"}</span>
+                }
+              </div>
+              {/* Manufacturer */}
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Manufacturer</span>
+                {isDraft
+                  ? <select className="input w-40 text-sm" value={edit.manufacturerId} onChange={e => setE("manufacturerId", e.target.value)}>
+                      <option value="">Select…</option>
+                      {mfrs.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  : <span className="text-sm font-medium text-gray-900">{sample.manufacturer.name}</span>
+                }
+              </div>
+              {/* Sample Size */}
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Sample Size</span>
+                {isDraft
+                  ? <select className="input w-40 text-sm" value={edit.sampleSize} onChange={e => setE("sampleSize", e.target.value)}>
+                      {["35","36","37","38","39","40","41","42"].map(s => <option key={s} value={s}>EU {s}</option>)}
+                    </select>
+                  : <span className="text-sm font-medium text-gray-900">{sample.sampleSize ? `EU ${sample.sampleSize}` : "-"}</span>
+                }
+              </div>
+              {/* Last Model */}
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Last Model</span>
+                {isDraft
+                  ? <input className="input w-40 text-sm" value={edit.lastModel} onChange={e => setE("lastModel", e.target.value)} placeholder="SR-2026-001" />
+                  : <span className="text-sm font-medium text-gray-900">{sample.lastModel || "-"}</span>
+                }
+              </div>
+              {/* Date Sent */}
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Date Sent</span>
+                {isDraft
+                  ? <input className="input w-40 text-sm" type="date" value={edit.dateSent} onChange={e => setE("dateSent", e.target.value)} />
+                  : <span className="text-sm font-medium text-gray-900">{formatDate(sample.dateSent)}</span>
+                }
+              </div>
+              {/* Deadline */}
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Deadline</span>
+                {isDraft
+                  ? <input className="input w-40 text-sm" type="date" value={edit.deadline} onChange={e => setE("deadline", e.target.value)} />
+                  : <span className="text-sm font-medium text-gray-900">{formatDate(sample.deadline)}</span>
+                }
+              </div>
+            </div>
           </div>
 
-          {/* SKU */}
           <div className="card p-5">
-            <h2 className="font-semibold text-gray-900 mb-3">SKU & Color</h2>
-            <dl className="space-y-2 text-sm">
+            <h2 className="font-semibold text-gray-900 mb-4">SKU & Color</h2>
+            <div className="space-y-3">
               {[
-                ["Supplier SKU", sample.supplierSku],
-                ["H2U SKU", sample.h2uSku],
-                ["Color", sample.colorName],
-                ["Color Code", sample.colorCode],
-              ].map(([k, v]) => (
-                <div key={k} className="flex justify-between">
-                  <dt className="text-gray-500">{k}</dt>
-                  <dd className="font-medium text-gray-900">{v || "-"}</dd>
+                { label: "Supplier SKU", key: "supplierSku", readonly: true, value: sample.supplierSku },
+                { label: "H2U SKU",      key: "h2uSku",      readonly: true, value: sample.h2uSku },
+              ].map(({ label, value }) => (
+                <div key={label} className="flex justify-between">
+                  <span className="text-sm text-gray-500">{label}</span>
+                  <span className="text-sm font-medium text-gray-900">{value || "-"}</span>
                 </div>
               ))}
-            </dl>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Color Name</span>
+                {isDraft
+                  ? <input className="input w-40 text-sm" value={edit.colorName} onChange={e => setE("colorName", e.target.value)} placeholder="BEIGE" />
+                  : <span className="text-sm font-medium text-gray-900">{sample.colorName || "-"}</span>
+                }
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Color Code</span>
+                {isDraft
+                  ? <input className="input w-40 text-sm" value={edit.colorCode} onChange={e => setE("colorCode", e.target.value)} placeholder="262" />
+                  : <span className="text-sm font-medium text-gray-900">{sample.colorCode || "-"}</span>
+                }
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Right: Materials */}
         <div className="card p-5">
-          <h2 className="font-semibold text-gray-900 mb-3">Material Specifications</h2>
-          <div className="space-y-3">
-            {[
-              { label: "Upper (鞋面)",    val: sample.materialUpper,   photo: sample.materialUpperPhoto,   remark: sample.materialUpperRemark },
-              { label: "Lining (内里)",   val: sample.materialLining,  photo: sample.materialLiningPhoto,  remark: sample.materialLiningRemark },
-              { label: "Midsole (中底)",  val: sample.materialMidsole, photo: sample.materialMidsolePhoto, remark: sample.materialMidsoleRemark },
-              { label: "Outsole (大底)",  val: sample.materialOutsole, photo: sample.materialOutsolePhoto, remark: sample.materialOutsoleRemark },
-              { label: "Hardware (五金)", val: sample.hardware,         photo: sample.hardwarePhoto,         remark: sample.hardwareRemark },
-              { label: "Heel (鞋跟)",    val: sample.heelSpec,         photo: sample.heelSpecPhoto,         remark: sample.heelSpecRemark },
-              { label: "Platform",        val: sample.platformSpec,     photo: sample.platformSpecPhoto,     remark: sample.platformSpecRemark },
-              { label: "Logo",            val: sample.logoSpec,         photo: sample.logoSpecPhoto,         remark: sample.logoSpecRemark },
-            ].map(r => (
-              <div key={r.label} className="border-b border-gray-50 pb-2 last:border-0">
-                <div className="flex items-start gap-2">
-                  {r.photo && <img src={r.photo} alt={r.label} className="w-10 h-10 object-cover rounded border border-gray-200 flex-shrink-0" />}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-500">{r.label}</p>
-                    <p className="text-sm font-medium text-gray-900 truncate">{r.val || "—"}</p>
-                    {r.remark && <p className="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded mt-0.5">{r.remark}</p>}
+          <h2 className="font-semibold text-gray-900 mb-4">Material Specifications</h2>
+          <div className="space-y-4">
+            {MATERIAL_ROWS.map(row => (
+              <div key={row.key} className={isDraft ? "border border-gray-100 rounded-xl p-3 space-y-2" : "border-b border-gray-50 pb-3 last:border-0"}>
+                <p className="text-xs font-semibold text-gray-600">{row.label}</p>
+                {isDraft ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input className="input text-sm" placeholder="Material…"
+                        value={edit[row.key] ?? ""} onChange={e => setE(row.key, e.target.value)} />
+                      <input className="input text-sm" placeholder="Remark…"
+                        value={edit[`${row.key}Remark`] ?? ""} onChange={e => setE(`${row.key}Remark`, e.target.value)} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">Photo:</span>
+                      <PhotoCell url={edit[`${row.key}Photo`]} onChange={url => setE(`${row.key}Photo`, url)} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-start gap-2">
+                    {(sample as any)[`${row.key}Photo`] && (
+                      <img src={(sample as any)[`${row.key}Photo`]} alt={row.label} className="w-10 h-10 object-cover rounded border border-gray-200 flex-shrink-0" />
+                    )}
+                    <div>
+                      <p className="text-sm text-gray-900">{(sample as any)[row.key] || "—"}</p>
+                      {(sample as any)[`${row.key}Remark`] && (
+                        <p className="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded mt-0.5">{(sample as any)[`${row.key}Remark`]}</p>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* View Notes */}
+      {/* Product Views & Notes */}
       <div className="card p-5">
-        <h2 className="font-semibold text-gray-900 mb-3">Product Views & Notes</h2>
-        <div className="grid grid-cols-5 gap-3">
-          {viewNotes.map(v => (
-            <ViewPhotoCell
-              key={v.label}
-              label={v.label}
-              photo={v.photo}
-              notes={v.notes}
-              onUpload={async (url) => {
-                const fieldMap: Record<string, string> = {
-                  "A — Side": "photoSideUrl", "B — Back": "photoBackUrl",
-                  "C — Front": "photoFrontUrl", "D — Platform": "photoPlatformUrl",
-                  "E — Heel": "photoHeelUrl",
-                };
-                await fetch(`/api/samples/${id}`, {
-                  method: "PATCH", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ [fieldMap[v.label]]: url }),
-                });
-                fetch(`/api/samples/${id}`).then(r => r.json()).then(setSample);
-              }}
-            />
+        <h2 className="font-semibold text-gray-900 mb-4">Product Views & Notes</h2>
+        <div className="grid grid-cols-5 gap-4">
+          {VIEW_ROWS.map(v => (
+            <div key={v.label} className="text-center">
+              <ViewPhotoCell
+                label={v.label}
+                photo={isDraft ? edit[v.photoKey] : (sample as any)[v.photoKey]}
+                notes={isDraft ? edit[v.notesKey] : (sample as any)[v.notesKey]}
+                onUpload={url => {
+                  setE(v.photoKey, url);
+                  // Auto-save photo immediately even in draft
+                  fetch(`/api/samples/${id}`, {
+                    method: "PATCH", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ [v.photoKey]: url }),
+                  });
+                }}
+              />
+              {isDraft && (
+                <input className="input text-xs mt-2 text-center" placeholder="Notes…"
+                  value={edit[v.notesKey] ?? ""} onChange={e => setE(v.notesKey, e.target.value)} />
+              )}
+            </div>
           ))}
         </div>
       </div>
 
-      {/* Amendment & IP Notes */}
-      {(sample.amendmentNotes || sample.ipNotes) && (
-        <div className="card p-5 border-l-4 border-amber-400">
-          <h2 className="font-semibold text-gray-900 mb-3">Design Changes & Instructions</h2>
-          {sample.designSource && <p className="text-xs text-gray-500 mb-2">Source: {sample.designSource}</p>}
-          {sample.ipNotes && <div className="mb-3"><p className="text-xs font-medium text-gray-600 mb-1">IP / Design Origin</p><p className="text-sm text-gray-800">{sample.ipNotes}</p></div>}
-          {sample.amendmentNotes && <div><p className="text-xs font-medium text-gray-600 mb-1">Amendment Instructions to Manufacturer</p><p className="text-sm text-gray-800 whitespace-pre-wrap">{sample.amendmentNotes}</p></div>}
-        </div>
-      )}
-
-      {/* Cost & Pricing */}
-      {sample.costRm && (
-        <div className="card p-5">
-          <h2 className="font-semibold text-gray-900 mb-3">Cost & Pricing</h2>
-          <div className="grid grid-cols-4 gap-4 text-center">
-            <div><p className="text-xs text-gray-500">Cost (RMB)</p><p className="text-xl font-bold text-gray-900">¥ {sample.costRmb?.toFixed(2) ?? "-"}</p></div>
-            <div><p className="text-xs text-gray-500">Cost (RM)</p><p className="text-xl font-bold text-gray-900">RM {sample.costRm.toFixed(2)}</p></div>
-            <div><p className="text-xs text-gray-500">Retail @ 75% margin</p><p className="text-xl font-bold text-green-700">RM {sample.suggestedRetailLow?.toFixed(2) ?? "-"}</p></div>
-            <div><p className="text-xs text-gray-500">Retail @ 80% margin</p><p className="text-xl font-bold text-green-700">RM {sample.suggestedRetailHigh?.toFixed(2) ?? "-"}</p></div>
+      {/* Design & IP Notes */}
+      <div className="card p-5">
+        <h2 className="font-semibold text-gray-900 mb-4">Design Changes & IP Notes</h2>
+        {isDraft ? (
+          <div className="space-y-4">
+            <div>
+              <label className="label">Design Source</label>
+              <select className="input" value={edit.designSource} onChange={e => setE("designSource", e.target.value)}>
+                <option value="in-house">In-house original design</option>
+                <option value="reference">Based on reference (modified)</option>
+                <option value="licensed">Licensed design</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">IP / Design Origin Notes</label>
+              <textarea className="input" rows={3} value={edit.ipNotes} onChange={e => setE("ipNotes", e.target.value)}
+                placeholder="e.g. Original design by Happy2U. Reference shoe used only for last shape." />
+            </div>
+            <div>
+              <label className="label">Amendment / Special Instructions for Manufacturer</label>
+              <textarea className="input" rows={4} value={edit.amendmentNotes} onChange={e => setE("amendmentNotes", e.target.value)}
+                placeholder="e.g. Please change buckle color from silver to gun-black." />
+            </div>
+            <div>
+              <label className="label">General Notes</label>
+              <textarea className="input" rows={3} value={edit.generalNotes} onChange={e => setE("generalNotes", e.target.value)} />
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="space-y-3 text-sm">
+            {sample.designSource && <p className="text-gray-500">Source: <span className="text-gray-900 font-medium">{sample.designSource}</span></p>}
+            {sample.ipNotes && <div><p className="text-xs font-medium text-gray-500 mb-1">IP / Design Origin</p><p className="text-gray-800">{sample.ipNotes}</p></div>}
+            {sample.amendmentNotes && <div><p className="text-xs font-medium text-gray-500 mb-1">Amendment Instructions</p><p className="text-gray-800 whitespace-pre-wrap">{sample.amendmentNotes}</p></div>}
+            {sample.generalNotes && <div><p className="text-xs font-medium text-gray-500 mb-1">General Notes</p><p className="text-gray-800">{sample.generalNotes}</p></div>}
+            {!sample.ipNotes && !sample.amendmentNotes && !sample.generalNotes && <p className="text-gray-400">No notes.</p>}
+          </div>
+        )}
+      </div>
 
-      {/* ── After Receiving Sample section ───────────────────────── */}
+      {/* After Receiving Sample */}
       {["delivered","ready","used","rejected","received","approved"].includes(sample.status) && (
         <div className="card p-5 border-l-4 border-blue-400">
           <h2 className="font-semibold text-gray-900 mb-1">After Receiving Sample</h2>
@@ -439,9 +602,7 @@ export default function SampleDetailPage() {
                 onChange={e => setRcvEdit(p => ({ ...p, productCostRmb: e.target.value }))}
                 placeholder="0.00" />
               {rcvEdit.productCostRmb && (
-                <p className="text-xs text-gray-500 mt-1">
-                  ≈ RM {rmbToRm(parseFloat(rcvEdit.productCostRmb) || 0, rmbRate).toFixed(2)}
-                </p>
+                <p className="text-xs text-gray-500 mt-1">≈ RM {rmbToRm(parseFloat(rcvEdit.productCostRmb) || 0, rmbRate).toFixed(2)}</p>
               )}
             </div>
             <div className="col-span-2">
@@ -454,32 +615,6 @@ export default function SampleDetailPage() {
           <button onClick={saveReceived} disabled={rcvSaving} className="btn-secondary flex items-center gap-2">
             <Save size={14} /> {rcvSaving ? "Saving…" : "Save Received Info"}
           </button>
-          {(sample.supplierSku || sample.productCostRmb) && (
-            <div className="mt-3 pt-3 border-t border-gray-100 text-sm text-gray-500 flex gap-6">
-              {sample.supplierSku && <span>Supplier SKU: <strong className="text-gray-900">{sample.supplierSku}</strong></span>}
-              {sample.productCostRmb && <span>Cost: <strong className="text-gray-900">¥{sample.productCostRmb} ≈ RM{sample.productCostRm?.toFixed(2)}</strong></span>}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Purchase Order stage — H2U SKU ───────────────────────── */}
-      {["ready","used","approved"].includes(sample.status) && (
-        <div className="card p-5 border-l-4 border-green-400">
-          <h2 className="font-semibold text-gray-900 mb-1">Purchase Order Stage</h2>
-          <p className="text-xs text-gray-400 mb-4">Assign the H2U SKU when placing a Purchase Order for this product.</p>
-          <div className="flex gap-4 items-end">
-            <div className="flex-1">
-              <label className="label">H2U SKU</label>
-              <input className="input" value={poEdit.h2uSku}
-                onChange={e => setPoEdit(p => ({ ...p, h2uSku: e.target.value }))}
-                placeholder="e.g. S1764C" />
-            </div>
-            <button onClick={savePOStage} disabled={poSaving} className="btn-primary flex items-center gap-2">
-              <Save size={14} /> {poSaving ? "Saving…" : "Save H2U SKU"}
-            </button>
-          </div>
-          {sample.h2uSku && <p className="text-xs text-green-700 mt-2">H2U SKU assigned: <strong>{sample.h2uSku}</strong></p>}
         </div>
       )}
 
@@ -491,7 +626,7 @@ export default function SampleDetailPage() {
             <p className="text-sm text-gray-500 mb-4">All fields from v{sample.version} will be copied. Document what changed below.</p>
             <label className="label">Amendment Notes *</label>
             <textarea className="input mb-4" rows={5} value={amendNotes} onChange={e => setAmendNotes(e.target.value)}
-              placeholder="Describe all changes from this sample: e.g. Change buckle from silver to gun-black. Reduce heel height from 8cm to 6cm. Change upper material to genuine leather." />
+              placeholder="Describe all changes from this sample." />
             <div className="flex gap-3">
               <button onClick={() => setAmending(false)} className="btn-secondary flex-1">Cancel</button>
               <button onClick={createAmendment} className="btn-primary flex-1" disabled={saving}>
@@ -499,6 +634,14 @@ export default function SampleDetailPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {isDraft && (
+        <div className="flex justify-end gap-3 pb-6">
+          <button onClick={saveDraft} disabled={saving} className="btn-primary px-8 flex items-center gap-2">
+            <Save size={14} /> {saving ? "Saving…" : "Save Changes"}
+          </button>
         </div>
       )}
     </div>

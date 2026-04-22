@@ -3,22 +3,27 @@ import {
   Document, Page, Text, View, StyleSheet, Font, Image,
 } from "@react-pdf/renderer";
 
+// Happy2U brand colors
+const BRAND   = "#333333";  // charcoal
+const BEIGE   = "#f1e8de";  // warm beige
+const BEIGE2  = "#e8ddd2";  // border beige
+
 const S = StyleSheet.create({
   page:       { fontFamily: "Helvetica", fontSize: 9, padding: 28, color: "#1a1a1a" },
-  header:     { flexDirection: "row", justifyContent: "space-between", marginBottom: 14, borderBottom: "2pt solid #d03070", paddingBottom: 10 },
-  title:      { fontSize: 18, fontFamily: "Helvetica-Bold", color: "#d03070" },
+  header:     { flexDirection: "row", justifyContent: "space-between", marginBottom: 14, borderBottom: `2pt solid ${BRAND}`, paddingBottom: 10 },
+  title:      { fontSize: 18, fontFamily: "Helvetica-Bold", color: BRAND },
   subtitle:   { fontSize: 10, color: "#888", marginTop: 2 },
   metaRight:  { alignItems: "flex-end" },
   metaRow:    { flexDirection: "row", gap: 4, marginBottom: 2 },
   metaLabel:  { color: "#888", width: 80, textAlign: "right" },
   metaValue:  { fontFamily: "Helvetica-Bold" },
   section:    { marginBottom: 10 },
-  sectionTitle: { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#d03070", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 5, borderBottom: "0.5pt solid #f6aac8", paddingBottom: 3 },
+  sectionTitle: { fontSize: 8, fontFamily: "Helvetica-Bold", color: BRAND, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 5, borderBottom: `0.5pt solid ${BEIGE2}`, paddingBottom: 3 },
   row2:       { flexDirection: "row", gap: 10 },
   half:       { flex: 1 },
   table:      { borderTop: "0.5pt solid #e5e7eb", borderLeft: "0.5pt solid #e5e7eb" },
   tRow:       { flexDirection: "row" },
-  tHead:      { backgroundColor: "#fdf4f7" },
+  tHead:      { backgroundColor: BEIGE },
   tCell:      { borderBottom: "0.5pt solid #e5e7eb", borderRight: "0.5pt solid #e5e7eb", padding: "4 6" },
   tLabel:     { fontFamily: "Helvetica-Bold", fontSize: 8, color: "#555", flex: 1 },
   tValue:     { fontSize: 9, flex: 2 },
@@ -38,8 +43,8 @@ const S = StyleSheet.create({
   photoNote:  { fontSize: 7, color: "#555", marginTop: 3, textAlign: "center" },
   photoPlaceholder: { width: 70, height: 70, backgroundColor: "#f3f4f6", border: "0.5pt solid #e5e7eb" },
   footer:     { position: "absolute", bottom: 16, left: 28, right: 28, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: "#aaa", borderTop: "0.5pt solid #e5e7eb", paddingTop: 5 },
-  versionBadge: { backgroundColor: "#fdf4f7", border: "0.5pt solid #f6aac8", borderRadius: 10, padding: "2 8", alignSelf: "flex-start" },
-  versionText:  { color: "#d03070", fontFamily: "Helvetica-Bold", fontSize: 8 },
+  versionBadge: { backgroundColor: BEIGE, border: `0.5pt solid ${BEIGE2}`, borderRadius: 10, padding: "2 8", alignSelf: "flex-start" },
+  versionText:  { color: BRAND, fontFamily: "Helvetica-Bold", fontSize: 8 },
 });
 
 export function SampleOrderPDF({ sample }: { sample: any }) {
