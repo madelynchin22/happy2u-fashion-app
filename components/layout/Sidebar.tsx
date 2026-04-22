@@ -35,7 +35,7 @@ export function Sidebar() {
       {/* Logo */}
       <div className="px-5 py-5 border-b border-[#e8ddd2]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.svg" alt="Happy2U" className="h-8 object-contain" />
+        <img src="/logo.png" alt="Happy2U" className="h-8 object-contain" />
         <p className="text-xs text-gray-500 mt-1">Fashion Management</p>
       </div>
 

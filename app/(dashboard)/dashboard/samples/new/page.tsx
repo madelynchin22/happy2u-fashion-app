@@ -13,7 +13,7 @@ const BRAND_LOGOS: Record<string, string> = {
   "Blissfit": "/logos/blissfit.png",
   "Latex":    "/logos/latex.png",
   "Cloudfeet":"/logos/cloudfeet.png",
-  "Bunny":    "/logos/bunny.png",
+  "Bunny":    "/logos/happy2u.png",
 };
 
 function today() { return new Date().toISOString().split("T")[0]; }
