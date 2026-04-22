@@ -173,8 +173,16 @@ export default function NewSamplePage() {
       const data = await res.json();
       router.push(`/dashboard/samples/${data.id}`);
     } else {
-      const err = await res.json().catch(() => ({}));
-      alert(`Failed to save: ${err.error || res.statusText}`);
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const text = await res.text();
+        // Try to parse as JSON for a proper error message
+        const json = JSON.parse(text);
+        errMsg = json.error || json.message || text.slice(0, 200);
+      } catch {
+        // response was not JSON
+      }
+      alert(`Failed to save (${errMsg})`);
     }
   }
 
