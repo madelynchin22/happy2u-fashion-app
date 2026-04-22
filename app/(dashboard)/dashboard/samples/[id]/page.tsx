@@ -495,7 +495,14 @@ export default function SampleDetailPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-400">Photo:</span>
-                      <PhotoCell url={edit[`${row.key}Photo`]} onChange={url => setE(`${row.key}Photo`, url)} />
+                      <PhotoCell url={edit[`${row.key}Photo`]} onChange={url => {
+                        setE(`${row.key}Photo`, url);
+                        // Auto-save photo to DB immediately
+                        fetch(`/api/samples/${id}`, {
+                          method: "PATCH", headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ [`${row.key}Photo`]: url }),
+                        });
+                      }} />
                     </div>
                   </>
                 ) : (

@@ -23,8 +23,10 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     }
 
     const buffer = await renderToBuffer(React.createElement(SampleOrderPDF, { sample }));
+    // NextResponse requires Uint8Array, not Node Buffer
+    const uint8 = new Uint8Array(buffer);
 
-    return new NextResponse(buffer, {
+    return new NextResponse(uint8, {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${sample.orderNumber}.pdf"`,
