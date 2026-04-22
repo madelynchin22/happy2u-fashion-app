@@ -68,7 +68,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       delete data.manufacturerId;
     }
 
-    const sample = await prisma.sampleOrder.update({ where: { id }, data });
+    const sample = await prisma.sampleOrder.update({
+      where: { id },
+      data,
+      include: {
+        manufacturer: true,
+        parent: { select: { id: true, orderNumber: true, version: true } },
+        children: { select: { id: true, orderNumber: true, version: true, status: true } },
+      },
+    });
     return NextResponse.json(sample);
   } catch (err: any) {
     console.error("PATCH /api/samples/[id] error:", err);
