@@ -12,7 +12,7 @@ type Product = {
   productUrl: string; imageUrl: string; priceMin: number; priceMax: number;
   colors: string; productType: string; isAvailable: boolean;
   isNew: boolean; wasRestocked: boolean; restockedAt?: string;
-  firstSeenAt: string; competitor: { name: string; url: string };
+  firstSeenAt: string; competitor: { name: string; url: string; country?: string };
 };
 
 export default function CompetitorsPage() {
@@ -22,6 +22,7 @@ export default function CompetitorsPage() {
   const [search, setSearch]           = useState("");
   const [filterComp, setFilterComp]   = useState("");
   const [filterType, setFilterType]   = useState("");
+  const [filterCountry, setFilterCountry] = useState("");
   const [crawling, setCrawling]       = useState<string | null>(null);
   const [crawlResult, setCrawlResult] = useState<Record<string, any>>({});
   const [modal, setModal]             = useState(false);
@@ -33,7 +34,7 @@ export default function CompetitorsPage() {
   const [pageError, setPageError]     = useState("");
 
   useEffect(() => { loadCompetitors(); }, []);
-  useEffect(() => { loadProducts(); }, [tab, filterComp, filterType, search]);
+  useEffect(() => { loadProducts(); }, [tab, filterComp, filterType, filterCountry, search]);
 
   async function loadCompetitors() {
     try {
@@ -47,6 +48,7 @@ export default function CompetitorsPage() {
       const params = new URLSearchParams({ tab });
       if (filterComp) params.set("competitorId", filterComp);
       if (filterType) params.set("productType", filterType);
+      if (filterCountry) params.set("country", filterCountry);
       if (search) params.set("search", search);
       const r = await fetch(`/api/competitors/products?${params}`);
       if (r.ok) setProducts(await r.json());
@@ -128,6 +130,10 @@ export default function CompetitorsPage() {
     setEditModal(c);
   }
 
+  const COUNTRY_FLAG: Record<string, string> = {
+    MY: "🇲🇾", SG: "🇸🇬", PH: "🇵🇭", ID: "🇮🇩", TH: "🇹🇭", CN: "🇨🇳", OTHER: "🌐",
+  };
+
   function parseColors(json: string): string[] {
     try { return JSON.parse(json) ?? []; } catch { return []; }
   }
@@ -171,7 +177,9 @@ export default function CompetitorsPage() {
                 </a>
               </div>
               <div className="flex items-center gap-1">
-                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{c.country}</span>
+                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                  {COUNTRY_FLAG[c.country] ?? "🌐"} {c.country}
+                </span>
                 <button onClick={() => openEdit(c)} className="p-1 text-gray-400 hover:text-gray-700" title="Edit">
                   <Pencil size={13} />
                 </button>
@@ -231,6 +239,14 @@ export default function CompetitorsPage() {
               <option value="shoes">👟 Shoes</option>
               <option value="bags">👜 Bags</option>
             </select>
+            <select className="input w-auto text-sm py-2" value={filterCountry} onChange={e => setFilterCountry(e.target.value)}>
+              <option value="">All countries</option>
+              <option value="MY">🇲🇾 Malaysia</option>
+              <option value="SG">🇸🇬 Singapore</option>
+              <option value="PH">🇵🇭 Philippines</option>
+              <option value="ID">🇮🇩 Indonesia</option>
+              <option value="TH">🇹🇭 Thailand</option>
+            </select>
             <div className="relative flex-1 min-w-[180px]">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input className="input pl-8 text-sm" placeholder="Search products…"
@@ -275,7 +291,9 @@ export default function CompetitorsPage() {
                         <p className="text-xs font-bold text-brand-700 mt-1">{formatPrice(p.priceMin, p.priceMax)}</p>
                         {colors.length > 0 && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{colors.join(", ")}</p>}
                         <div className="flex items-center justify-between mt-1">
-                          <p className="text-[10px] text-gray-400">{p.competitor.name}</p>
+                          <p className="text-[10px] text-gray-400">
+                            {COUNTRY_FLAG[p.competitor.country ?? ""] ?? ""} {p.competitor.name}
+                          </p>
                           {p.productType && <span className="text-[9px] bg-gray-100 text-gray-500 px-1 py-0.5 rounded capitalize">{p.productType}</span>}
                         </div>
                       </div>

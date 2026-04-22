@@ -45,12 +45,38 @@ async function main() {
   }
   console.log("✅ Manufacturers seeded:", manufacturerNames.join(", "));
 
-  // Default competitors
+  // Default competitors — MY + regional
   const competitors = [
-    { name: "My Ballerine",    url: "https://www.myballerine.com",  country: "MY" },
-    { name: "Charles & Keith", url: "https://www.charleskeith.com", country: "MY" },
-    { name: "Bata Malaysia",   url: "https://www.bata.com/my",      country: "MY" },
-    { name: "Vincci",          url: "https://www.padini.com/vincci", country: "MY" },
+    // Malaysia
+    { name: "My Ballerine",    url: "https://www.myballerine.com",        country: "MY" },
+    { name: "Charles & Keith", url: "https://www.charleskeith.com",       country: "MY" },
+    { name: "Bata Malaysia",   url: "https://www.bata.com/my",            country: "MY" },
+    { name: "Vincci",          url: "https://www.padini.com/vincci",       country: "MY" },
+    { name: "Nose",            url: "https://www.nose.com.my",            country: "MY" },
+    // Singapore
+    { name: "Pedro",           url: "https://www.pedro.com.sg",           country: "SG" },
+    { name: "Schu",            url: "https://www.schu.sg",                country: "SG" },
+    { name: "Steve Madden SG", url: "https://www.stevemadden.com.sg",     country: "SG" },
+    { name: "Bysi",            url: "https://www.bysi.com",               country: "SG" },
+    { name: "Pomelo Fashion",  url: "https://www.pomelofashion.com",      country: "SG" },
+    // Philippines
+    { name: "Primadonna",      url: "https://www.primadonna.com.ph",      country: "PH" },
+    { name: "Parisian",        url: "https://www.parisian.com.ph",        country: "PH" },
+    { name: "Mendrez",         url: "https://www.mendrez.com.ph",         country: "PH" },
+    { name: "So.Fab!",         url: "https://www.sofab.com.ph",           country: "PH" },
+    { name: "Shoebox PH",      url: "https://www.theshoebox.ph",          country: "PH" },
+    // Indonesia
+    { name: "Yongki Komaladi", url: "https://www.yongkikomaladi.com",     country: "ID" },
+    { name: "Buccheri",        url: "https://www.buccheri.com",           country: "ID" },
+    { name: "Colorbox",        url: "https://www.colorboxindonesia.com",  country: "ID" },
+    { name: "Carvil",          url: "https://www.carvil.co.id",           country: "ID" },
+    { name: "Fladeo",          url: "https://www.fladeo.co.id",           country: "ID" },
+    // Thailand
+    { name: "Vinny",           url: "https://www.vinny.co.th",            country: "TH" },
+    { name: "Monobo",          url: "https://www.monobo.co.th",           country: "TH" },
+    { name: "Baoji",           url: "https://www.baoji.co.th",            country: "TH" },
+    { name: "Keds Thailand",   url: "https://www.kedsthailand.com",       country: "TH" },
+    { name: "Naturalizer TH",  url: "https://www.naturalizer.co.th",      country: "TH" },
   ];
   for (const c of competitors) {
     const domain = c.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0];

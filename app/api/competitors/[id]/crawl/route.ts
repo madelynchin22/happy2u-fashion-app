@@ -389,7 +389,9 @@ async function scrapePadini(rawUrl: string): Promise<ScrapedProduct[]> {
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const cronSecret = _req.headers.get("x-cron-secret");
+  const validCron = cronSecret && process.env.CRON_SECRET && cronSecret === process.env.CRON_SECRET;
+  if (!session && !validCron) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const competitor = await prisma.competitor.findUnique({ where: { id: (await params).id } });
   if (!competitor) return NextResponse.json({ error: "Not found" }, { status: 404 });
