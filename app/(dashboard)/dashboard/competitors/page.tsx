@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { RefreshCw, Plus, ExternalLink, ShoppingBag, Search, X, PackageSearch, Pencil, Trash2 } from "lucide-react";
+import { RefreshCw, Plus, ExternalLink, ShoppingBag, Search, X, PackageSearch, Pencil, Trash2, Wand2 } from "lucide-react";
 
 type Competitor = {
   id: string; name: string; url: string; platform: string; country: string;
@@ -28,6 +28,7 @@ export default function CompetitorsPage() {
   const [form, setForm]               = useState({ name: "", url: "", country: "MY" });
   const [editForm, setEditForm]       = useState({ name: "", url: "", country: "MY" });
   const [saving, setSaving]           = useState(false);
+  const [seeding, setSeeding]         = useState(false);
   const [pageError, setPageError]     = useState("");
 
   useEffect(() => { loadCompetitors(); }, []);
@@ -63,6 +64,15 @@ export default function CompetitorsPage() {
     setCrawling(null);
     loadCompetitors();
     loadProducts();
+  }
+
+  async function seedDefaults() {
+    setSeeding(true);
+    const r = await fetch("/api/competitors/seed", { method: "POST" });
+    const d = await r.json();
+    await loadCompetitors();
+    setSeeding(false);
+    if (d.results) alert(d.results.join("\n"));
   }
 
   async function addCompetitor() {
@@ -135,9 +145,14 @@ export default function CompetitorsPage() {
           </h1>
           <p className="text-gray-500 text-sm mt-1">Track new arrivals and restocks from your competitors</p>
         </div>
-        <button onClick={() => setModal(true)} className="btn-primary flex items-center gap-2">
-          <Plus size={16} /> Add Competitor
-        </button>
+        <div className="flex gap-2">
+          <button onClick={seedDefaults} disabled={seeding} className="btn-secondary flex items-center gap-2">
+            <Wand2 size={15} /> {seeding ? "Setting up…" : "Setup Defaults"}
+          </button>
+          <button onClick={() => setModal(true)} className="btn-primary flex items-center gap-2">
+            <Plus size={16} /> Add Competitor
+          </button>
+        </div>
       </div>
 
       {/* Competitor cards */}
