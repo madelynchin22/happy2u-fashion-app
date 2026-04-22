@@ -9,10 +9,10 @@ async function main() {
   // Create admin user
   const adminPw = await bcrypt.hash("Happy2U@2026", 12);
   const admin = await prisma.user.upsert({
-    where: { email: "admin@happy2u.com" },
+    where: { email: "admin@happy2u.my" },
     update: {},
     create: {
-      email: "admin@happy2u.com",
+      email: "admin@happy2u.my",
       name:  "Admin",
       password: adminPw,
       role: "admin",
@@ -41,7 +41,7 @@ async function main() {
   console.log("✅ Exchange rate: 1 RMB = 0.62 RM");
 
   console.log("\n✨ Seed complete!");
-  console.log("📧 Login: admin@happy2u.com");
+  console.log("📧 Login: admin@happy2u.my");
   console.log("🔑 Password: Happy2U@2026");
   console.log("⚠️  Change this password after first login!");
 }
