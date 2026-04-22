@@ -6,7 +6,16 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { SampleOrderPDF } from "@/lib/pdf/sample-order";
 import React from "react";
 
-export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+/** Convert a relative /uploads/... URL to an absolute URL the PDF renderer can fetch */
+function toAbsolute(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  // Use NEXTAUTH_URL (set on Railway) or fall back to localhost
+  const base = (process.env.NEXTAUTH_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -17,13 +26,29 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     });
     if (!sample) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Only allow PDF download for non-draft orders
     if (sample.status === "draft") {
       return NextResponse.json({ error: "PDF is only available after the sample order is submitted." }, { status: 403 });
     }
 
-    const buffer = await renderToBuffer(React.createElement(SampleOrderPDF, { sample }));
-    // NextResponse requires Uint8Array, not Node Buffer
+    // Resolve all photo URLs to absolute so @react-pdf/renderer can fetch them
+    const resolved = {
+      ...sample,
+      photoSideUrl:         toAbsolute(sample.photoSideUrl),
+      photoBackUrl:         toAbsolute(sample.photoBackUrl),
+      photoFrontUrl:        toAbsolute(sample.photoFrontUrl),
+      photoPlatformUrl:     toAbsolute(sample.photoPlatformUrl),
+      photoHeelUrl:         toAbsolute(sample.photoHeelUrl),
+      materialUpperPhoto:   toAbsolute(sample.materialUpperPhoto),
+      materialLiningPhoto:  toAbsolute(sample.materialLiningPhoto),
+      materialMidsolePhoto: toAbsolute(sample.materialMidsolePhoto),
+      materialOutsolePhoto: toAbsolute(sample.materialOutsolePhoto),
+      hardwarePhoto:        toAbsolute(sample.hardwarePhoto),
+      heelSpecPhoto:        toAbsolute(sample.heelSpecPhoto),
+      platformSpecPhoto:    toAbsolute(sample.platformSpecPhoto),
+      logoSpecPhoto:        toAbsolute(sample.logoSpecPhoto),
+    };
+
+    const buffer = await renderToBuffer(React.createElement(SampleOrderPDF, { sample: resolved }));
     const uint8 = new Uint8Array(buffer);
 
     return new NextResponse(uint8, {

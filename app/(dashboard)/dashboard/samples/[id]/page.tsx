@@ -334,12 +334,21 @@ export default function SampleDetailPage() {
   }
 
   async function downloadPdf() {
-    const res = await fetch(`/api/samples/${id}/pdf`);
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/samples/${id}/pdf`);
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { const d = await res.json(); msg = d.error ?? msg; } catch {}
+        alert(`PDF failed: ${msg}`);
+        return;
+      }
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
       a.href = url; a.download = `${sample?.orderNumber ?? "sample"}.pdf`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (e: any) {
+      alert(`PDF error: ${e.message}`);
     }
   }
 
