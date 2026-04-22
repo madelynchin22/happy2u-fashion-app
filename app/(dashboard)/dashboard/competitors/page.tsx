@@ -21,6 +21,7 @@ export default function CompetitorsPage() {
   const [tab, setTab]                 = useState<"new" | "restock" | "all">("new");
   const [search, setSearch]           = useState("");
   const [filterComp, setFilterComp]   = useState("");
+  const [filterType, setFilterType]   = useState("");
   const [crawling, setCrawling]       = useState<string | null>(null);
   const [crawlResult, setCrawlResult] = useState<Record<string, any>>({});
   const [modal, setModal]             = useState(false);
@@ -32,7 +33,7 @@ export default function CompetitorsPage() {
   const [pageError, setPageError]     = useState("");
 
   useEffect(() => { loadCompetitors(); }, []);
-  useEffect(() => { loadProducts(); }, [tab, filterComp, search]);
+  useEffect(() => { loadProducts(); }, [tab, filterComp, filterType, search]);
 
   async function loadCompetitors() {
     try {
@@ -45,6 +46,7 @@ export default function CompetitorsPage() {
     try {
       const params = new URLSearchParams({ tab });
       if (filterComp) params.set("competitorId", filterComp);
+      if (filterType) params.set("productType", filterType);
       if (search) params.set("search", search);
       const r = await fetch(`/api/competitors/products?${params}`);
       if (r.ok) setProducts(await r.json());
@@ -224,6 +226,11 @@ export default function CompetitorsPage() {
               <option value="">All competitors</option>
               {competitors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            <select className="input w-auto text-sm py-2" value={filterType} onChange={e => setFilterType(e.target.value)}>
+              <option value="">All types</option>
+              <option value="shoes">👟 Shoes</option>
+              <option value="bags">👜 Bags</option>
+            </select>
             <div className="relative flex-1 min-w-[180px]">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input className="input pl-8 text-sm" placeholder="Search products…"
@@ -267,7 +274,10 @@ export default function CompetitorsPage() {
                         <p className="text-xs font-medium text-gray-900 line-clamp-2 leading-tight">{p.name}</p>
                         <p className="text-xs font-bold text-brand-700 mt-1">{formatPrice(p.priceMin, p.priceMax)}</p>
                         {colors.length > 0 && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{colors.join(", ")}</p>}
-                        <p className="text-[10px] text-gray-400 mt-1">{p.competitor.name}</p>
+                        <div className="flex items-center justify-between mt-1">
+                          <p className="text-[10px] text-gray-400">{p.competitor.name}</p>
+                          {p.productType && <span className="text-[9px] bg-gray-100 text-gray-500 px-1 py-0.5 rounded capitalize">{p.productType}</span>}
+                        </div>
                       </div>
                     </a>
                   );

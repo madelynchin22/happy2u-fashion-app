@@ -11,12 +11,20 @@ export async function GET(req: NextRequest) {
   const tab           = searchParams.get("tab") ?? "new";        // new | restock | all
   const competitorId  = searchParams.get("competitorId") ?? undefined;
   const search        = searchParams.get("search") ?? "";
+  const productType   = searchParams.get("productType") ?? "";   // shoes | bags | ""
 
   const where: any = {};
   if (competitorId) where.competitorId = competitorId;
   if (tab === "new")     where.isNew = true;
   if (tab === "restock") where.wasRestocked = true;
   if (search) where.name = { contains: search };
+  if (productType === "bags") {
+    // Match any productType containing "bag" (bag, bags, handbag, handbags, mcbags…)
+    where.productType = { contains: "bag" };
+  } else if (productType === "shoes") {
+    // Exclude bag types — match everything that doesn't contain "bag"
+    where.NOT = { productType: { contains: "bag" } };
+  }
 
   const products = await prisma.competitorProduct.findMany({
     where,

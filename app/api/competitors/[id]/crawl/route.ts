@@ -5,13 +5,30 @@ import { prisma } from "@/lib/db";
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-async function fetchText(url: string, timeoutMs = 15000): Promise<{ text: string; finalUrl: string }> {
+const BROWSER_HEADERS = {
+  "User-Agent": UA,
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "Accept-Language": "en-MY,en;q=0.9",
+  "Accept-Encoding": "gzip, deflate, br",
+  "Cache-Control": "no-cache",
+  "Pragma": "no-cache",
+  "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+  "Sec-Ch-Ua-Mobile": "?0",
+  "Sec-Ch-Ua-Platform": '"macOS"',
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-User": "?1",
+  "Upgrade-Insecure-Requests": "1",
+};
+
+async function fetchText(url: string, timeoutMs = 15000, extraHeaders: Record<string, string> = {}): Promise<{ text: string; finalUrl: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": UA, "Accept": "text/html,application/json,*/*", "Accept-Language": "en-MY,en;q=0.9" },
+      headers: { ...BROWSER_HEADERS, ...extraHeaders },
       redirect: "follow",
     });
     return { text: await res.text(), finalUrl: res.url };
@@ -134,14 +151,21 @@ async function scrapeCharlesKeith(): Promise<ScrapedProduct[]> {
           if (!d.item_id) continue;
           if (seen.has(d.item_id)) continue;
           seen.add(d.item_id);
-          const price = parseFloat(d.price) || 0;
+          // Prefer local_price (MYR) over price (SGD)
+          const price = parseFloat(d.local_price ?? d.price) || 0;
           const baseId = d.item_id.replace(/_[A-Z]+$/, "").toLowerCase();
+          // Use item_url if available (direct product link), else build from id
+          const productUrl = d.item_url
+            ? d.item_url.replace("https://www.charleskeith.com", "https://www.charleskeith.com")
+            : `https://www.charleskeith.com/my/products/${baseId}`;
+          // Use item_image_url if available
+          const imageUrl = d.item_image_url ?? pidImgMap[d.item_id] ?? "";
           products.push({
             externalId: d.item_id,
             name: d.item_name ?? d.item_id,
             handle: d.item_id.toLowerCase(),
-            productUrl: `https://www.charleskeith.com/my/products/${baseId}`,
-            imageUrl: pidImgMap[d.item_id] ?? "",
+            productUrl,
+            imageUrl,
             priceMin: price, priceMax: price,
             colors: JSON.stringify([]),
             productType: d.item_category2 ?? d.item_category ?? "shoes",
@@ -157,13 +181,13 @@ async function scrapeCharlesKeith(): Promise<ScrapedProduct[]> {
 }
 
 // ── Bata scraper ──────────────────────────────────────────────────────────────
-// Uses Constructor.io data-cnstrc-* attributes embedded in the listing HTML
+// Primary: data-cnstrc-* HTML attributes in listing pages (30s timeout)
+// Fallback: Constructor.io browse API (no prices, but at least shows products)
 
-async function scrapeBata(): Promise<ScrapedProduct[]> {
+async function scrapeBataHTML(): Promise<ScrapedProduct[]> {
+  // Use only the main shoes + new-arrivals page to reduce load
   const crawlPages = [
     "https://www.bata.com/my/women/shoes/",
-    "https://www.bata.com/my/women/sandals/",
-    "https://www.bata.com/my/women/sneakers/",
     "https://www.bata.com/my/new-arrivals/",
   ];
   const seen = new Set<string>();
@@ -171,7 +195,12 @@ async function scrapeBata(): Promise<ScrapedProduct[]> {
 
   for (const page of crawlPages) {
     try {
-      const { text } = await fetchText(page);
+      // 30s timeout — page is ~1.7MB
+      const { text } = await fetchText(page, 30000);
+      if (text.includes("cf-browser-verification") || text.includes("Just a moment")) {
+        throw new Error("Cloudflare challenge on Bata page");
+      }
+
       const itemMatches = [...text.matchAll(
         /data-cnstrc-item-variation-id="([^"]+)"[\s\S]{0,100}?data-cnstrc-item-price="([^"]+)"/g
       )];
@@ -188,6 +217,10 @@ async function scrapeBata(): Promise<ScrapedProduct[]> {
         const nameM = ctx.match(/aria-label="([^"]+)"/);
         const imgM  = ctx.match(/src="(https:\/\/www\.bata\.com\/dw\/image[^"]+)"/);
 
+        const type = page.includes("new-arrivals") ? "shoes" :
+          urlM?.[1]?.includes("sandal") ? "sandals" :
+          urlM?.[1]?.includes("sneaker") ? "sneakers" : "shoes";
+
         products.push({
           externalId: sku,
           name: nameM?.[1] ?? sku,
@@ -196,15 +229,93 @@ async function scrapeBata(): Promise<ScrapedProduct[]> {
           imageUrl: imgM?.[1] ?? "",
           priceMin: price, priceMax: price,
           colors: JSON.stringify([]),
-          productType: "shoes",
+          productType: type,
           isAvailable: true,
         });
       }
     } catch (err: any) {
-      if (err.name !== "AbortError") console.error("Bata page error:", page, err.message);
+      console.error("Bata HTML page error:", page, err.message);
+      // Don't throw — try next page; caller handles 0-product fallback
     }
   }
   return products;
+}
+
+async function scrapeBataAPI(): Promise<ScrapedProduct[]> {
+  // Constructor.io browse — no prices, but gives name/image/url
+  const groups = ["MY_Women_Shoes", "MY_NewArrivals_Women"];
+  const seen = new Set<string>();
+  const products: ScrapedProduct[] = [];
+  const CK = "key_4rGphEFxhqeg3t9E";
+
+  for (const group of groups) {
+    for (let page = 1; page <= 7; page++) {
+      try {
+        const { text } = await fetchText(
+          `https://ac.cnstrc.com/browse/group_id/${group}?key=${CK}&num_results_per_page=100&page=${page}`,
+          15000,
+          { Accept: "application/json" }
+        );
+        const json = JSON.parse(text);
+        const items: any[] = json?.response?.results ?? [];
+        if (!items.length) break;
+
+        for (const item of items) {
+          const id = item.data?.variation_id ?? item.data?.id;
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+
+          // Resolve image URL (relative paths need base)
+          const rawImg: string = item.data?.image_url ?? "";
+          const imageUrl = rawImg.startsWith("http")
+            ? rawImg
+            : rawImg ? `https://www.bata.com${rawImg}` : "";
+
+          // Resolve product URL from staging → live
+          const rawUrl: string = item.data?.url ?? "";
+          const productUrl = rawUrl.includes("bata.com/my/")
+            ? rawUrl.replace(/^https?:\/\/[^/]+/, "https://www.bata.com")
+            : `https://www.bata.com/my/`;
+
+          // Infer product type from group_ids
+          const groupIds: string[] = item.data?.group_ids ?? [];
+          const isBag = groupIds.some((g: string) => /bag|handbag|purse/i.test(g));
+          const productType = isBag ? "bags" : "shoes";
+
+          products.push({
+            externalId: id,
+            name: item.value ?? id,
+            handle: id.toLowerCase(),
+            productUrl,
+            imageUrl,
+            priceMin: 0, priceMax: 0,
+            colors: JSON.stringify([]),
+            productType,
+            isAvailable: true,
+          });
+        }
+
+        if (items.length < 100) break;
+      } catch (err: any) {
+        console.error("Bata API page error:", group, page, err.message);
+        break;
+      }
+    }
+  }
+  return products;
+}
+
+async function scrapeBata(): Promise<ScrapedProduct[]> {
+  try {
+    const products = await scrapeBataHTML();
+    if (products.length > 0) return products;
+    // HTML returned 0 (blocked?) — use API fallback
+    console.warn("Bata HTML returned 0 — falling back to Constructor.io API");
+    return scrapeBataAPI();
+  } catch {
+    console.warn("Bata HTML failed — falling back to Constructor.io API");
+    return scrapeBataAPI();
+  }
 }
 
 // ── Padini/Vincci scraper ─────────────────────────────────────────────────────

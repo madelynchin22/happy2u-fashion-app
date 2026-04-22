@@ -40,6 +40,7 @@ const S = StyleSheet.create({
   photoLabel:  { fontSize: 7, color: "#888", marginBottom: 3, fontFamily: "Helvetica-Bold" },
   photoImg:    { width: 70, height: 70, objectFit: "contain", border: "0.5pt solid #e5e7eb" },
   photoPlaceholder: { width: 70, height: 70, backgroundColor: "#f3f4f6", border: "0.5pt solid #e5e7eb" },
+  photoNote:   { fontSize: 7, color: "#555", marginTop: 3, textAlign: "center" },
   footer:      { position: "absolute", bottom: 16, left: 28, right: 28, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: "#aaa", borderTop: "0.5pt solid #e5e7eb", paddingTop: 5 },
   versionBadge:{ backgroundColor: BEIGE, border: "0.5pt solid #e8ddd2", borderRadius: 10, padding: "2 8", alignSelf: "flex-start" },
   versionText: { color: BRAND, fontFamily: "Helvetica-Bold", fontSize: 8 },
