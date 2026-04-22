@@ -31,11 +31,12 @@ export function Sidebar() {
   const role = (session?.user as any)?.role ?? "";
 
   return (
-    <aside className="w-60 min-h-screen bg-white border-r border-gray-200 flex flex-col">
+    <aside className="w-60 min-h-screen flex flex-col border-r border-[#e8ddd2]" style={{ backgroundColor: "#f1e8de" }}>
       {/* Logo */}
-      <div className="px-5 py-5 border-b border-gray-100">
-        <span className="text-xl font-bold text-brand-700">Happy2U</span>
-        <p className="text-xs text-gray-400 mt-0.5">Fashion Management</p>
+      <div className="px-5 py-5 border-b border-[#e8ddd2]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.png" alt="Happy2U" className="h-8 object-contain" />
+        <p className="text-xs text-gray-500 mt-1">Fashion Management</p>
       </div>
 
       {/* Nav */}
@@ -50,8 +51,8 @@ export function Sidebar() {
               href={item.href}
               className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                 active
-                  ? "bg-brand-50 text-brand-700 font-medium"
-                  : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                  ? "bg-white text-brand-700 font-medium shadow-sm"
+                  : "text-gray-600 hover:bg-white/60 hover:text-gray-900"
               }`}
             >
               <Icon size={16} />

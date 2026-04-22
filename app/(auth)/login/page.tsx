@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,11 +22,18 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-50 to-brand-100">
-      <div className="card w-full max-w-md p-8">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-brand-700">Happy2U</h1>
-          <p className="text-gray-500 text-sm mt-1">Business Management System</p>
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#f1e8de" }}>
+      <div className="bg-white rounded-2xl shadow-lg w-full max-w-md p-10">
+        <div className="flex flex-col items-center mb-8">
+          <Image
+            src="/logo.png"
+            alt="Happy2U"
+            width={180}
+            height={72}
+            className="object-contain mb-3"
+            priority
+          />
+          <p className="text-gray-500 text-sm">Business Management System</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -36,7 +44,7 @@ export default function LoginPage() {
               value={email}
               onChange={e => setEmail(e.target.value)}
               required
-              placeholder="you@happy2u.com"
+              placeholder="you@happy2u.my"
             />
           </div>
           <div>
@@ -51,7 +59,7 @@ export default function LoginPage() {
             />
           </div>
           {error && <p className="text-red-600 text-sm">{error}</p>}
-          <button type="submit" className="btn-primary w-full" disabled={loading}>
+          <button type="submit" className="btn-primary w-full py-3 text-base" disabled={loading}>
             {loading ? "Signing in…" : "Sign In"}
           </button>
         </form>

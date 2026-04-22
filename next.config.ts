@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   images: {
-    domains: ["localhost"],
+    domains: ["localhost", "happy2u-app-production.up.railway.app"],
   },
   experimental: {
     serverActions: {
