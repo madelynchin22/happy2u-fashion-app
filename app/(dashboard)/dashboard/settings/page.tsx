@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Save, Plus, Trash2, RefreshCw } from "lucide-react";
+import { Save, Plus, Trash2, Edit2, X } from "lucide-react";
 
 type Outlet = { id: string; name: string; marking: string; country: string; address?: string; isHQ: boolean };
 type User   = { id: string; name?: string; email: string; role: string; outletId?: string };
@@ -20,6 +20,8 @@ export default function SettingsPage() {
 
   const [outletModal, setOutletModal] = useState(false);
   const [outletForm, setOutletForm]   = useState({ name:"", marking:"", country:"MY", address:"", isHQ:false });
+  const [editOutlet, setEditOutlet]   = useState<Outlet | null>(null);
+  const [editForm, setEditForm]       = useState({ name:"", marking:"", country:"MY", address:"", isHQ:false });
   const [userModal, setUserModal]     = useState(false);
   const [userForm, setUserForm]       = useState({ name:"", email:"", password:"", role:"buyer", outletId:"" });
 
@@ -46,6 +48,29 @@ export default function SettingsPage() {
       method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(outletForm),
     });
     if (res.ok) { const d = await res.json(); setOutlets(o => [...o, d]); setOutletModal(false); }
+  }
+
+  function openEditOutlet(o: Outlet) {
+    setEditOutlet(o);
+    setEditForm({ name: o.name, marking: o.marking, country: o.country, address: o.address ?? "", isHQ: o.isHQ });
+  }
+
+  async function updateOutlet() {
+    if (!editOutlet) return;
+    const res = await fetch(`/api/outlets/${editOutlet.id}`, {
+      method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify(editForm),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      setOutlets(prev => prev.map(o => o.id === d.id ? d : o));
+      setEditOutlet(null);
+    }
+  }
+
+  async function deleteOutlet(id: string) {
+    if (!confirm("Remove this outlet?")) return;
+    const res = await fetch(`/api/outlets/${id}`, { method:"DELETE" });
+    if (res.ok) setOutlets(prev => prev.filter(o => o.id !== id));
   }
 
   async function saveUser() {
@@ -92,7 +117,9 @@ export default function SettingsPage() {
         </div>
         <div className="space-y-2">
           {outlets.map(o => (
-            <div key={o.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div key={o.id}
+              onClick={() => openEditOutlet(o)}
+              className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors group">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-gray-900 text-sm">{o.name}</span>
@@ -101,6 +128,20 @@ export default function SettingsPage() {
                 </div>
                 <p className="text-xs text-gray-400 mt-0.5">Marking: <span className="font-mono">{o.marking}</span></p>
                 {o.address && <p className="text-xs text-gray-400">{o.address}</p>}
+              </div>
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={e => { e.stopPropagation(); openEditOutlet(o); }}
+                  className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700">
+                  <Edit2 size={14} />
+                </button>
+                {isAdmin && (
+                  <button
+                    onClick={e => { e.stopPropagation(); deleteOutlet(o.id); }}
+                    className="p-1.5 rounded-lg hover:bg-red-100 text-gray-400 hover:text-red-600">
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -167,6 +208,55 @@ export default function SettingsPage() {
             <div className="flex gap-3 mt-5">
               <button onClick={()=>setOutletModal(false)} className="btn-secondary flex-1">Cancel</button>
               <button onClick={saveOutlet} className="btn-primary flex-1" disabled={!outletForm.name||!outletForm.marking}>Save Outlet</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Outlet Modal */}
+      {editOutlet && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="card w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Edit Outlet</h2>
+              <button onClick={() => setEditOutlet(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="label">Outlet Name *</label>
+                <input className="input" value={editForm.name} onChange={e => setEditForm(f => ({...f, name: e.target.value}))} />
+              </div>
+              <div>
+                <label className="label">Marking Code *</label>
+                <input className="input" value={editForm.marking} onChange={e => setEditForm(f => ({...f, marking: e.target.value}))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Country</label>
+                  <select className="input" value={editForm.country} onChange={e => setEditForm(f => ({...f, country: e.target.value}))}>
+                    <option value="MY">Malaysia</option>
+                    <option value="TH">Thailand</option>
+                  </select>
+                </div>
+                <div className="flex items-end pb-0.5">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" checked={editForm.isHQ} onChange={e => setEditForm(f => ({...f, isHQ: e.target.checked}))} />
+                    This is HQ
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label className="label">Address</label>
+                <input className="input" value={editForm.address} onChange={e => setEditForm(f => ({...f, address: e.target.value}))} />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setEditOutlet(null)} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={updateOutlet} className="btn-primary flex-1" disabled={!editForm.name || !editForm.marking}>
+                Save Changes
+              </button>
             </div>
           </div>
         </div>

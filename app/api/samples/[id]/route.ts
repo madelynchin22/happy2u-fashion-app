@@ -15,6 +15,7 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
       collection: true,
       parent: { select: { id: true, orderNumber: true, version: true } },
       children: { select: { id: true, orderNumber: true, version: true, status: true } },
+      productLibraries: { select: { id: true, mainSku: true, productName: true, status: true }, take: 1 },
     },
   });
   if (!sample) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -34,7 +35,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const strFields = [
       "status", "brand", "season", "sampleSize", "lastModel", "productName", "productNumber",
-      "manufacturerId", "collectionId", "supplierSku", "h2uSku",
+      "manufacturerId", "collectionId", "supplierSku", "h2uSku", "mainSku",
       "colorName", "colorCode",
       "materialUpper", "materialUpperRemark", "materialUpperPhoto",
       "materialLining", "materialLiningRemark", "materialLiningPhoto",
@@ -49,10 +50,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       "generalNotes", "amendmentNotes", "designSource", "ipNotes",
       "receivedRemark",
       "trackingNumber", "courierCompany",
+      "category", "sizesOffered", "colorVariants", "trendInspiration",
+      "predecessorSku", "predecessorLesson", "launchType",
     ];
 
     const dateFields = ["dateSent", "deadline", "sentAt", "receivedAt", "shipOutDate"];
-    const numFields  = ["productCostRmb", "productCostRm", "costRmb", "costRm", "suggestedRetailLow", "suggestedRetailHigh"];
+    const numFields  = [
+      "productCostRmb", "productCostRm", "costRmb", "costRm", "suggestedRetailLow", "suggestedRetailHigh",
+      "bulkCostEst", "leadTime", "moq",
+    ];
 
     for (const f of strFields) {
       if (f in raw) data[f] = raw[f] ?? null;
@@ -78,6 +84,57 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         children: { select: { id: true, orderNumber: true, version: true, status: true } },
       },
     });
+
+    // Auto-create ProductLibrary drafts (one per color) when sample is approved
+    if (data.status === "approved") {
+      const existingLib = await prisma.productLibrary.findFirst({ where: { sampleOrderId: sample.id } });
+      if (!existingLib) {
+        let colors: { name: string; hex: string; code?: string }[] = [];
+        if (sample.colorVariants) {
+          try { colors = JSON.parse(sample.colorVariants as string); } catch {}
+        }
+        if (colors.length === 0 && sample.colorName) {
+          colors = [{ name: sample.colorName, hex: sample.colorCode ?? "", code: sample.colorCode ?? "" }];
+        }
+        if (colors.length === 0) {
+          colors = [{ name: "", hex: "", code: "" }];
+        }
+        const libCount = await prisma.productLibrary.count();
+        for (let i = 0; i < colors.length; i++) {
+          const cv = colors[i];
+          const colorCodeLetter = cv.code || null;
+          const mainSkuVal      = (sample as any).mainSku || null;
+          const colorSkuVal     = mainSkuVal && colorCodeLetter ? mainSkuVal + colorCodeLetter : null;
+          const libNumber = `PL-${new Date().getFullYear()}-${String(libCount + i + 1).padStart(3, "0")}`;
+          await prisma.productLibrary.create({
+            data: {
+              libNumber,
+              status:          "draft",
+              productName:     sample.productName  || "Product",
+              brand:           sample.brand        || null,
+              colorName:       cv.name             || sample.colorName  || null,
+              colorCode:       colorCodeLetter,
+              mainSku:         mainSkuVal,
+              h2uSku:          colorSkuVal,
+              materialUpper:   sample.materialUpper   || null,
+              materialLining:  sample.materialLining  || null,
+              materialMidsole: sample.materialMidsole || null,
+              materialOutsole: sample.materialOutsole || null,
+              hardware:        sample.hardware     || null,
+              logoSpec:        sample.logoSpec     || null,
+              heelSpec:        sample.heelSpec     || null,
+              platformSpec:    sample.platformSpec  || null,
+              supplierSku:     sample.supplierSku  || null,
+              manufacturerId:  sample.manufacturerId || null,
+              sampleOrderId:   sample.id,
+              costRmb:         sample.productCostRmb || null,
+              costRm:          sample.productCostRm  || null,
+            },
+          });
+        }
+      }
+    }
+
     return NextResponse.json(sample);
   } catch (err: any) {
     console.error("PATCH /api/samples/[id] error:", err);
@@ -115,4 +172,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     console.error("POST /api/samples/[id] error:", err);
     return NextResponse.json({ error: err?.message ?? "Amendment failed" }, { status: 500 });
   }
+}
+
+export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  await prisma.sampleOrder.delete({ where: { id: (await params).id } });
+  return NextResponse.json({ ok: true });
 }

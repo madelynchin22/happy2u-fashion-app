@@ -1,22 +1,31 @@
 import React from "react";
-import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
+import { Document, Page, Text, View, StyleSheet, Image, Font } from "@react-pdf/renderer";
+import { join } from "path";
+
+Font.register({
+  family: "NotoSansSC",
+  fonts: [
+    { src: join(process.cwd(), "public/fonts/NotoSansSC-Regular.otf"), fontWeight: "normal" },
+    { src: join(process.cwd(), "public/fonts/NotoSansSC-Bold.otf"),    fontWeight: "bold"   },
+  ],
+});
 
 const S = StyleSheet.create({
-  page:       { fontFamily: "Helvetica", fontSize: 8, padding: "20 24", color: "#1a1a1a" },
+  page:       { fontFamily: "NotoSansSC", fontSize: 8, padding: "20 24", color: "#1a1a1a" },
   header:     { flexDirection: "row", justifyContent: "space-between", marginBottom: 10, borderBottom: "2pt solid #d03070", paddingBottom: 8 },
-  logoText:   { fontSize: 20, fontFamily: "Helvetica-Bold", color: "#d03070" },
-  docTitle:   { fontSize: 12, fontFamily: "Helvetica-Bold", color: "#374151", marginTop: 2 },
+  logoText:   { fontSize: 20, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" },
+  docTitle:   { fontSize: 12, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#374151", marginTop: 2 },
   metaBox:    { alignItems: "flex-end" },
   metaRow:    { flexDirection: "row", gap: 4, marginBottom: 2 },
   metaLabel:  { color: "#888", width: 70, textAlign: "right" },
-  metaValue:  { fontFamily: "Helvetica-Bold", color: "#1a1a1a" },
+  metaValue:  { fontFamily: "NotoSansSC", fontWeight: "bold", color: "#1a1a1a" },
   totalsBox:  { backgroundColor: "#fdf4f7", border: "1pt solid #f6aac8", borderRadius: 3, padding: "5 10", alignItems: "flex-end", marginTop: 4 },
   totalsLabel: { color: "#888", fontSize: 7 },
-  totalsValue: { fontFamily: "Helvetica-Bold", fontSize: 11, color: "#d03070" },
+  totalsValue: { fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 11, color: "#d03070" },
   // Main table
   table:      { marginTop: 8 },
   thead:      { flexDirection: "row", backgroundColor: "#1a1a1a", color: "white" },
-  th:         { padding: "4 3", fontFamily: "Helvetica-Bold", fontSize: 7, color: "white", borderRight: "0.5pt solid #555" },
+  th:         { padding: "4 3", fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, color: "white", borderRight: "0.5pt solid #555" },
   tbody:      { },
   tr:         { flexDirection: "row", borderBottom: "0.5pt solid #e5e7eb" },
   trAlt:      { backgroundColor: "#fdf4f7" },
@@ -24,15 +33,16 @@ const S = StyleSheet.create({
   // Column widths
   colPhoto:   { width: 35 },
   colSku:     { width: 38 },
-  colBrand:   { width: 40 },
-  colH2u:     { width: 40 },
-  colColor:   { width: 38 },
-  colCode:    { width: 20 },
+  colBrand:   { width: 36 },
+  colMain:    { width: 36 },
+  colH2u:     { width: 42 },
+  colColor:   { width: 36 },
+  colCode:    { width: 18 },
   colMat:     { width: 45 },
   colSize:    { width: 18, textAlign: "center" },
-  colPairs:   { width: 22, textAlign: "center", fontFamily: "Helvetica-Bold" },
+  colPairs:   { width: 22, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" },
   colPrice:   { width: 32, textAlign: "right" },
-  colTotal:   { width: 35, textAlign: "right", fontFamily: "Helvetica-Bold", color: "#d03070" },
+  colTotal:   { width: 35, textAlign: "right", fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" },
   photoImg:   { width: 30, height: 30, objectFit: "contain" },
   footer:     { position: "absolute", bottom: 14, left: 24, right: 24, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: "#aaa", borderTop: "0.5pt solid #e5e7eb", paddingTop: 4 },
 });
@@ -45,9 +55,17 @@ export function PurchaseOrderPDF({ po }: { po: any }) {
       <Page size="A3" orientation="landscape" style={S.page}>
         {/* Header */}
         <View style={S.header}>
-          <View>
-            <Text style={S.logoText}>Happy2U</Text>
-            <Text style={S.docTitle}>PURCHASE ORDER</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            {po.photoUrl && (
+              <Image src={po.photoUrl} style={{ width: 60, height: 60, objectFit: "contain", borderRadius: 4, border: "1pt solid #e5e7eb" }} />
+            )}
+            <View>
+              <Text style={S.logoText}>Happy2U</Text>
+              <Text style={S.docTitle}>PURCHASE ORDER</Text>
+              {po.libProductName && (
+                <Text style={{ fontSize: 8, color: "#888", marginTop: 2 }}>{po.libProductName}</Text>
+              )}
+            </View>
           </View>
           <View style={S.metaBox}>
             <View style={S.metaRow}>
@@ -83,6 +101,7 @@ export function PurchaseOrderPDF({ po }: { po: any }) {
             <Text style={[S.th, S.colPhoto]}>Photo</Text>
             <Text style={[S.th, S.colSku]}>Supplier SKU</Text>
             <Text style={[S.th, S.colBrand]}>Brand</Text>
+            <Text style={[S.th, S.colMain]}>Main SKU</Text>
             <Text style={[S.th, S.colH2u]}>H2U SKU</Text>
             <Text style={[S.th, S.colColor]}>Color</Text>
             <Text style={[S.th, S.colCode]}>Code</Text>
@@ -106,7 +125,12 @@ export function PurchaseOrderPDF({ po }: { po: any }) {
                 </View>
                 <Text style={[S.td, S.colSku]}>{item.supplierSku || ""}</Text>
                 <Text style={[S.td, S.colBrand]}>{item.brand || po.brand}</Text>
-                <Text style={[S.td, S.colH2u]}>{item.h2uSku || ""}</Text>
+                <Text style={[S.td, S.colMain]}>{item.mainSku || ""}</Text>
+                <Text style={[S.td, S.colH2u]}>
+                  {item.mainSku && item.colorCode
+                    ? `${item.mainSku}${item.colorCode}`
+                    : item.h2uSku || ""}
+                </Text>
                 <Text style={[S.td, S.colColor]}>{item.colorName || ""}</Text>
                 <Text style={[S.td, S.colCode]}>{item.colorCode || ""}</Text>
                 <Text style={[S.td, S.colMat]}>{item.materialUpper || ""}</Text>
@@ -128,7 +152,7 @@ export function PurchaseOrderPDF({ po }: { po: any }) {
 
         {po.notes && (
           <View style={{ marginTop: 8, backgroundColor: "#fffbeb", border: "0.5pt solid #fbbf24", borderRadius: 3, padding: 6 }}>
-            <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 7, color: "#92400e", marginBottom: 2 }}>NOTES</Text>
+            <Text style={{ fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, color: "#92400e", marginBottom: 2 }}>NOTES</Text>
             <Text style={{ color: "#78350f" }}>{po.notes}</Text>
           </View>
         )}

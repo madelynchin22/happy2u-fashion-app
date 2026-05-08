@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -42,6 +42,7 @@ model Outlet {
   packingListItems  PackingListItem[]
   shipments         Shipment[]
   deliveries        Delivery[]
+  outletDeliveries  OutletDelivery[]
 }
 
 // ─── EXCHANGE RATE ───────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ model Manufacturer {
   country       String  @default("CN")
   moq           Int?
   leadTimeDays  Int?
+  rating        Float?  // supplier rating 1-5
   paymentTerms  String?
   materials     String?   // comma-separated: "PU,genuine leather,suede"
   notes         String?
@@ -147,8 +149,9 @@ model SampleOrder {
   // Product spec fields matching your PO format
   supplierSku     String?
   h2uSku          String?
+  mainSku         String?  // style-level SKU e.g. S1800
   colorName       String?
-  colorCode       String?
+  colorCode       String?  // single letter/code for SKU e.g. H
   materialUpper   String?
   materialLining  String?
   materialMidsole String?
@@ -210,19 +213,32 @@ model SampleOrder {
   suggestedRetailLow  Float?
   suggestedRetailHigh Float?
 
+  // Product evaluation fields
+  category        String?  // e.g., Loafers, Sneakers, Sandals
+  moq             Int?     // minimum order quantity
+  bulkCostEst     Float?   // estimated bulk cost in RM
+  leadTime        Int?     // lead time in days
+  sizesOffered    String?  // e.g., "EU 35-41"
+  colorVariants   String?  // JSON: [{name,hex}]
+  trendInspiration String? // inspiration/trend description
+  predecessorSku  String?  // previous SKU this is based on
+  predecessorLesson String? // lessons learned from predecessor
+  launchType      String?  // "market_test" | "full_launch"
+
   createdById     String?
   createdBy       User?    @relation("CreatedBy", fields: [createdById], references: [id])
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   poItems         PurchaseOrderItem[]
+  productLibraries ProductLibrary[]
 }
 
 // ─── PURCHASE ORDERS ─────────────────────────────────────────────────────────
 
 model PurchaseOrder {
   id              String  @id @default(cuid())
-  poNumber        String  @unique  // JUN-04, JUN-05...
+  poNumber        String  @unique  // PO-2026-001
   date            DateTime @default(now())
 
   manufacturerId  String
@@ -230,15 +246,37 @@ model PurchaseOrder {
   collectionId    String?
   collection      Collection?  @relation(fields: [collectionId], references: [id])
 
-  brand           String  @default("MS SWEET")
+  brand           String  @default("Happy2U")
+  productName     String?   // main product display name
   deliveryDate    DateTime?
   currency        String  @default("RMB")
+
+  // Order classification
+  poType          String?   // "test" | "reorder" | "replen" | "clear"
+  sampleOrderId   String?   // linked sample order (PO level)
+  parentPoNumber  String?   // reference to parent PO for reorder/replen
+
+  // Logistics
+  destination     String?   // "Melaka HQ" | "Split: HQ + 3 outlets" etc.
+  paymentTerms    String?   // "30% deposit / 70% pre-ship"
+  paymentIncoterm String?   // "FOB Guangzhou"
+  fxRate          Float?    // locked exchange rate ¥/RM
+
+  // Production timeline dates
+  productionStartDate DateTime?
+  qcDate              DateTime?
+  shipDate            DateTime?
+  paymentPaidDate     DateTime?
+
+  // Insights & allocations
+  sizeCurveInsight String?
+  allocations      String?  // JSON: [{destination,pairs,pct}]
 
   // Totals (calculated)
   totalPairs      Int     @default(0)
   totalPrice      Float   @default(0)
 
-  status          String  @default("draft") // draft | sent | confirmed | in_production | shipped | closed
+  status          String  @default("draft") // draft | sent | in_production | shipped | closed
   notes           String?
   pdfUrl          String?
 
@@ -250,6 +288,7 @@ model PurchaseOrder {
   items           PurchaseOrderItem[]
   packingLists    PackingList[]
   shipmentItems   ShipmentItem[]
+  outletDeliveries OutletDelivery[]
 }
 
 model PurchaseOrderItem {
@@ -275,7 +314,8 @@ model PurchaseOrderItem {
   photoUrl        String?
   deliveryDate    DateTime?
 
-  // Size run EU 36-42
+  // Size run EU 35-42
+  qty35           Int     @default(0)
   qty36           Int     @default(0)
   qty37           Int     @default(0)
   qty38           Int     @default(0)
@@ -287,6 +327,14 @@ model PurchaseOrderItem {
 
   discountPrice   Float?
   lineTotal       Float?
+
+  outletAllocations String?  // JSON: [{outletId, qty36-42}] per-outlet size breakdown
+
+  // Goods receipt
+  receivedQty     Int?
+  defectQty       Int?
+  receiptNotes    String?
+  receiptDate     DateTime?
 
   packingListItems PackingListItem[]
   deliveryItems    DeliveryItem[]
@@ -508,10 +556,13 @@ model BestSeller {
   season        String?
   colorName     String?
   material      String?
-  unitsSold     Int?
-  revenueRm     Float?
-  notes         String?
-  createdAt     DateTime @default(now())
+  unitsSold      Int?
+  revenueRm      Float?
+  marginPct      Float?   // actual gross margin % (e.g. 52 = 52%)
+  sellThroughPct Float?   // % of ordered stock sold (e.g. 96 = 96%)
+  daysOnSale     Int?     // days the product was on sale (for velocity calc)
+  notes          String?
+  createdAt      DateTime @default(now())
 }
 
 // ─── PRODUCT LIBRARY ──────────────────────────────────────────────────────────
@@ -520,13 +571,24 @@ model ProductLibrary {
   id              String   @id @default(cuid())
   libNumber       String   @unique  // PL-2026-001
   productName     String
-  h2uSku          String?
+  h2uSku          String?  // color-level SKU = mainSku + colorCode  e.g. S1800H
+  mainSku         String?  // style-level SKU shared across colours  e.g. S1800
   supplierSku     String?
   brand           String?
-  category        String?  // heels | flats | sandals | boots | bags | accessories
+  category        String?  // heels | flats | sandals | boots | sneakers | wedges | bags | accessories | shoe_care | clearance | keychain | merchandiser
   colorName       String?
-  colorCode       String?
+  colorCode       String?  // single letter/code appended after mainSku  e.g. H
   season          String?
+
+  // Inventory & status (synced from Shopify export)
+  status          String?  // draft | active | low_stock | out_of_stock | clearance
+  inventoryTotal  Int?     // total qty across all sizes & locations
+  warehouseQty    Int?     // H2U Warehouse (Melaka) qty
+  sizeRange       String?  // e.g. "36–41"
+  availableSizes  String?  // JSON array of sizes e.g. '["36","37","38","39"]'
+  sizeInventory   String?  // JSON object of per-size qty e.g. '{"36":5,"37":4,"38":0}'
+  compareAtPrice  Float?   // original price before discount
+  productType     String?  // raw Shopify type
 
   // Material specs
   materialUpper   String?
@@ -543,16 +605,64 @@ model ProductLibrary {
   costRm          Float?
   sellingPrice    Float?
 
-  // Photos (JSON array of URLs)
-  imageUrls       String?
+  // Sales velocity (derived from inventory snapshot comparison)
+  unitsSold       Int?     // units sold in the tracked window (null = unknown due to restock)
+  daysTracked     Int?     // length of the window in days
+  aprInventory    Int?     // inventory at start of window (April 6 snapshot)
+  restockQty      Int?     // net inventory gain when May > April (velocity indeterminate)
+
+  // Photos
+  shoePhotoUrl    String?   // primary shoe photo (main view)
+  photoSideUrl    String?   // side view photo
+  photoUpperUrl   String?   // upper / top-down view photo
+  photoDesignUrl  String?   // design detail / embellishment view
+  boxPhotoUrl     String?   // shoe box / packaging photo
+  imageUrls       String?   // legacy JSON array
 
   notes           String?
 
   // Source tracking
   sampleOrderId   String?
+  sampleOrder     SampleOrder?  @relation(fields: [sampleOrderId], references: [id])
   manufacturerId  String?
   manufacturer    Manufacturer? @relation(fields: [manufacturerId], references: [id])
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// ─── PER-OUTLET DELIVERY TRACKING ────────────────────────────────────────────
+
+model OutletDelivery {
+  id               String   @id @default(cuid())
+  poId             String
+  po               PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  outletId         String
+  outlet           Outlet   @relation(fields: [outletId], references: [id])
+
+  estimatedArrival DateTime?
+  actualArrival    DateTime?
+  // pending | in_transit | arrived | receipt_done
+  status           String   @default("pending")
+  notes            String?
+
+  receiptItems     OutletReceiptItem[]
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([poId, outletId])
+}
+
+model OutletReceiptItem {
+  id           String         @id @default(cuid())
+  deliveryId   String
+  delivery     OutletDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  poItemId     String         // links to PurchaseOrderItem
+  colorName    String?
+  orderedQty   Int            @default(0)
+  receivedQty  Int?
+  defectQty    Int?
+  notes        String?
+  receiptDate  DateTime?
 }

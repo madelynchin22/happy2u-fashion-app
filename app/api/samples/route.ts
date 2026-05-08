@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
     include: {
       manufacturer: { select: { id: true, name: true } },
       children: { select: { id: true, version: true, status: true } },
+      productLibraries: { select: { id: true, mainSku: true, productName: true, status: true }, take: 1 },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -33,10 +34,14 @@ export async function POST(req: NextRequest) {
     const count = await prisma.sampleOrder.count();
     const orderNumber = generateOrderNumber("SR", count + 1);
 
+    // Resolve user ID by email to avoid stale JWT issues after DB resets
+    const dbUser = await prisma.user.findUnique({ where: { email: session.user!.email! } });
+    const createdById = dbUser?.id ?? null;
+
     // Only pass known schema fields to avoid Prisma unknown field errors
     const {
       productName, brand, season, sampleSize, lastModel,
-      dateSent, deadline, manufacturerId, colorName, colorCode,
+      dateSent, deadline, manufacturerId, mainSku, colorName, colorCode, colorVariants,
       materialUpper, materialUpperRemark, materialUpperPhoto,
       materialLining, materialLiningRemark, materialLiningPhoto,
       materialMidsole, materialMidsoleRemark, materialMidsolePhoto,
@@ -53,13 +58,13 @@ export async function POST(req: NextRequest) {
     const sample = await prisma.sampleOrder.create({
       data: {
         orderNumber,
-        createdById: (session.user as any).id,
+        createdById,
         productName: productName || "Sample",
         brand, season, sampleSize, lastModel,
         dateSent: dateSent ? new Date(dateSent) : null,
         deadline: deadline ? new Date(deadline) : null,
         manufacturerId,
-        colorName, colorCode,
+        mainSku: mainSku ?? null, colorName, colorCode, colorVariants: colorVariants ?? null,
         materialUpper, materialUpperRemark, materialUpperPhoto,
         materialLining, materialLiningRemark, materialLiningPhoto,
         materialMidsole, materialMidsoleRemark, materialMidsolePhoto,

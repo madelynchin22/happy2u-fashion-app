@@ -1,30 +1,39 @@
 import React from "react";
-import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, Text, View, StyleSheet, Font } from "@react-pdf/renderer";
+import { join } from "path";
+
+Font.register({
+  family: "NotoSansSC",
+  fonts: [
+    { src: join(process.cwd(), "public/fonts/NotoSansSC-Regular.otf"), fontWeight: "normal" },
+    { src: join(process.cwd(), "public/fonts/NotoSansSC-Bold.otf"),    fontWeight: "bold"   },
+  ],
+});
 
 const S = StyleSheet.create({
-  page:    { fontFamily: "Helvetica", fontSize: 9, padding: "22 26", color: "#1a1a1a" },
+  page:    { fontFamily: "NotoSansSC", fontSize: 9, padding: "22 26", color: "#1a1a1a" },
   header:  { borderBottom: "2pt solid #dc2626", paddingBottom: 10, marginBottom: 12 },
-  logo:    { fontSize: 18, fontFamily: "Helvetica-Bold", color: "#dc2626" },
-  title:   { fontSize: 12, fontFamily: "Helvetica-Bold", color: "#374151", marginTop: 2 },
+  logo:    { fontSize: 18, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#dc2626" },
+  title:   { fontSize: 12, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#374151", marginTop: 2 },
   subtitle:{ fontSize: 9, color: "#888", marginTop: 1 },
   row2:    { flexDirection: "row", gap: 12, marginBottom: 10 },
   infoBox: { flex: 1, border: "0.5pt solid #e5e7eb", borderRadius: 3, padding: 8 },
-  infoTitle:{ fontFamily: "Helvetica-Bold", fontSize: 8, color: "#dc2626", marginBottom: 5 },
+  infoTitle:{ fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 8, color: "#dc2626", marginBottom: 5 },
   infoRow: { flexDirection: "row", marginBottom: 3 },
   infoLabel:{ width: 80, color: "#888", fontSize: 8 },
-  infoVal: { fontFamily: "Helvetica-Bold", fontSize: 8 },
+  infoVal: { fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 8 },
   alertBox:{ backgroundColor: "#fef2f2", border: "1pt solid #fca5a5", borderRadius: 3, padding: "6 10", marginBottom: 10, flexDirection: "row", gap: 10 },
-  alertNum:{ fontSize: 22, fontFamily: "Helvetica-Bold", color: "#dc2626" },
+  alertNum:{ fontSize: 22, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#dc2626" },
   alertLabel:{ fontSize: 8, color: "#991b1b", marginTop: 4 },
   table:   { marginBottom: 10 },
   thead:   { flexDirection: "row", backgroundColor: "#dc2626" },
-  th:      { color: "white", padding: "4 5", fontFamily: "Helvetica-Bold", fontSize: 7, borderRight: "0.5pt solid #ef4444" },
+  th:      { color: "white", padding: "4 5", fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, borderRight: "0.5pt solid #ef4444" },
   tr:      { flexDirection: "row", borderBottom: "0.5pt solid #e5e7eb" },
   trFlag:  { backgroundColor: "#fef2f2" },
   td:      { padding: "4 5", fontSize: 8, borderRight: "0.5pt solid #f3f4f6" },
   cSku:    { width: 50 }, cH2u:{ width: 50 }, cColor:{ width: 50 },
   cExp:    { width: 35, textAlign: "center" }, cRec:{ width: 35, textAlign: "center" },
-  cDisc:   { width: 35, textAlign: "center", fontFamily: "Helvetica-Bold" },
+  cDisc:   { width: 35, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" },
   cType:   { width: 55 }, cDesc:{ flex: 1 },
   sig:     { marginTop: 20, flexDirection: "row", gap: 20 },
   sigBox:  { flex: 1, borderTop: "1pt solid #e5e7eb", paddingTop: 5 },
@@ -108,7 +117,7 @@ export function DiscrepancyReportPDF({ report, delivery }: { report: any; delive
 
         {report.notes && (
           <View style={{ backgroundColor: "#fffbeb", border: "0.5pt solid #fbbf24", borderRadius: 3, padding: 8, marginBottom: 12 }}>
-            <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 8, color: "#92400e", marginBottom: 3 }}>ADDITIONAL NOTES</Text>
+            <Text style={{ fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 8, color: "#92400e", marginBottom: 3 }}>ADDITIONAL NOTES</Text>
             <Text style={{ color: "#78350f", lineHeight: 1.5 }}>{report.notes}</Text>
           </View>
         )}

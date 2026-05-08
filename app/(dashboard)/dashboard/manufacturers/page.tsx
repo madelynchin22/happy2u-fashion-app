@@ -24,7 +24,8 @@ export default function ManufacturersPage() {
 
   async function load() {
     const res = await fetch("/api/manufacturers");
-    setList(await res.json());
+    const data = await res.json();
+    setList(Array.isArray(data) ? data : []);
   }
 
   useEffect(() => { load(); }, []);
@@ -39,12 +40,11 @@ export default function ManufacturersPage() {
 
   async function save() {
     setSaving(true);
-    if (editing) {
-      await fetch(`/api/manufacturers/${editing.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    } else {
-      await fetch("/api/manufacturers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    }
+    const res = editing
+      ? await fetch(`/api/manufacturers/${editing.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) })
+      : await fetch("/api/manufacturers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
     setSaving(false);
+    if (!res.ok) { alert("Save failed. Please sign out and sign back in."); return; }
     setModal(false);
     load();
   }

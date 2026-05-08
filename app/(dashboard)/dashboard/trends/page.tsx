@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Plus, TrendingUp, ExternalLink, Search, Globe, RefreshCw, Sparkles, SlidersHorizontal } from "lucide-react";
+import { Plus, Star, ArrowUpRight } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 
 type TrendItem = {
   id: string; category: string; title: string; description?: string;
@@ -11,52 +12,107 @@ type TrendItem = {
   trendScore?: number; season?: string; scrapedAt: string; isManual: boolean;
 };
 
-const CATS    = ["all","color","material","accessory","silhouette","style"];
-const MARKETS = ["all","MY","TH","GLOBAL"];
-const PRICE_RANGES = [
-  { label: "All prices", min: 0, max: Infinity },
-  { label: "Under RM 89", min: 0, max: 89 },
-  { label: "RM 89 – 149", min: 89, max: 149 },
-  { label: "RM 150 – 249", min: 150, max: 249 },
-  { label: "RM 250+", min: 250, max: Infinity },
-];
-
 const CAT_COLORS: Record<string, string> = {
-  color:      "bg-pink-100 text-pink-700",
+  color:      "bg-purple-100 text-purple-700",
   material:   "bg-amber-100 text-amber-700",
-  accessory:  "bg-purple-100 text-purple-700",
+  accessory:  "bg-orange-100 text-orange-700",
   silhouette: "bg-blue-100 text-blue-700",
-  style:      "bg-green-100 text-green-700",
+  style:      "bg-red-100 text-red-700",
 };
 
-function trendPhotoUrl(t: TrendItem): string | null {
-  return t.imageUrl ?? null;
+function getMomentum(score?: number): { label: string; icon: string; cls: string } | null {
+  if (score == null) return null;
+  if (score >= 65) return { label: "Rising",   icon: "↑", cls: "bg-green-200 text-green-800" };
+  if (score >= 35) return { label: "Stable",   icon: "→", cls: "bg-amber-200 text-amber-800" };
+  return               { label: "Declining", icon: "↓", cls: "bg-red-100 text-red-700" };
 }
 
+function CategoryIcon({ category }: { category: string }) {
+  const cls = "stroke-gray-400 fill-none stroke-[1.5]";
+  switch (category) {
+    case "silhouette":
+      return (
+        <svg viewBox="0 0 80 80" className="w-20 h-20">
+          <rect x="20" y="24" width="40" height="44" rx="4" className={cls} />
+          <path d="M30 24 v-6 a10 10 0 0 1 20 0 v6" className={cls} />
+          <rect x="32" y="36" width="16" height="2" rx="1" className={cls} />
+          <rect x="32" y="44" width="16" height="2" rx="1" className={cls} />
+          <rect x="32" y="52" width="10" height="2" rx="1" className={cls} />
+        </svg>
+      );
+    case "style":
+      return (
+        <svg viewBox="0 0 80 80" className="w-20 h-20">
+          <path d="M24 58 L28 32 Q40 22 52 32 L56 58 Z" className={cls} />
+          <path d="M28 32 Q34 26 40 24 Q46 26 52 32" className={cls} />
+          <ellipse cx="40" cy="24" rx="6" ry="4" className={cls} />
+        </svg>
+      );
+    case "material":
+      return (
+        <svg viewBox="0 0 80 80" className="w-20 h-20">
+          <line x1="20" y1="34" x2="60" y2="34" className={cls} strokeLinecap="round" />
+          <line x1="20" y1="44" x2="60" y2="44" className={cls} strokeLinecap="round" />
+          <line x1="28" y1="54" x2="52" y2="54" className={cls} strokeLinecap="round" />
+        </svg>
+      );
+    case "color":
+      return (
+        <svg viewBox="0 0 80 80" className="w-20 h-20">
+          <circle cx="40" cy="40" r="20" className={cls} />
+          <line x1="40" y1="26" x2="40" y2="54" className={cls} strokeLinecap="round" />
+          <line x1="26" y1="40" x2="54" y2="40" className={cls} strokeLinecap="round" />
+        </svg>
+      );
+    default:
+      return (
+        <svg viewBox="0 0 80 80" className="w-20 h-20">
+          <diamond cx="40" cy="40" r="20" className={cls} />
+          <path d="M40 20 L56 40 L40 60 L24 40 Z" className={cls} />
+        </svg>
+      );
+  }
+}
+
+const CATS = ["all","color","material","silhouette","style"];
+const SECONDARY = ["all_markets","rising_only","not_acting"];
+const SECONDARY_LABELS: Record<string, string> = {
+  all_markets: "All markets",
+  rising_only: "Rising only",
+  not_acting:  "Not yet acting",
+};
+
 export default function TrendsPage() {
-  const [trends, setTrends]         = useState<TrendItem[]>([]);
-  const [cat, setCat]               = useState("all");
-  const [market, setMarket]         = useState("all");
-  const [search, setSearch]         = useState("");
-  const [brandFilter, setBrand]     = useState("");
-  const [colorFilter, setColor]     = useState("");
-  const [priceIdx, setPriceIdx]     = useState(0);
-  const [showFilters, setShowFilters] = useState(false);
-  const [modal, setModal]           = useState(false);
-  const [saving, setSaving]         = useState(false);
+  const [trends, setTrends]     = useState<TrendItem[]>([]);
+  const [saved, setSaved]       = useState<Set<string>>(new Set());
+  const [cat, setCat]           = useState("all");
+  const [secondary, setSecondary] = useState("all_markets");
+  const [modal, setModal]       = useState(false);
+  const [saving, setSaving]     = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshMsg, setRefreshMsg] = useState("");
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [form, setForm] = useState({
     category:"color", title:"", description:"", imageUrl:"", sourceUrl:"",
     sourceName:"Manual", market:"MY", brand:"", colorName:"",
-    priceMin:"", priceMax:"", rankPosition:"", salesData:"", season:"",
+    priceMin:"", priceMax:"", rankPosition:"", salesData:"", season:"", trendScore:"",
   });
 
   useEffect(() => {
-    fetch("/api/trends").then(r => r.json()).then(setTrends).catch(() => setTrends([]));
+    fetch("/api/trends").then(r => r.json()).then(data => {
+      setTrends(data);
+      setLastRefresh(new Date());
+    }).catch(() => setTrends([]));
   }, []);
 
-  async function save() {
+  function toggleSave(id: string) {
+    setSaved(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  async function addTrend() {
     setSaving(true);
     const res = await fetch("/api/trends", {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -65,6 +121,7 @@ export default function TrendsPage() {
         rankPosition: form.rankPosition ? parseInt(form.rankPosition) : null,
         priceMin: form.priceMin ? parseFloat(form.priceMin) : null,
         priceMax: form.priceMax ? parseFloat(form.priceMax) : null,
+        trendScore: form.trendScore ? parseFloat(form.trendScore) : null,
         isManual: true,
       }),
     });
@@ -74,202 +131,150 @@ export default function TrendsPage() {
 
   async function autoRefresh() {
     setRefreshing(true);
-    setRefreshMsg("");
     const r = await fetch("/api/trends/auto-refresh", { method: "POST" });
-    const d = await r.json();
-    setRefreshing(false);
     if (r.ok) {
-      setRefreshMsg(`✓ Added ${d.added} new trend items from Zalora`);
       const res = await fetch("/api/trends");
       if (res.ok) setTrends(await res.json());
-    } else {
-      setRefreshMsg(`Error: ${d.error}`);
+      setLastRefresh(new Date());
     }
+    setRefreshing(false);
   }
 
-  const priceRange = PRICE_RANGES[priceIdx];
-
-  // Unique brands and colors for filter dropdowns
-  const brands = Array.from(new Set(trends.map(t => t.brand).filter(Boolean))) as string[];
-  const colors  = Array.from(new Set(trends.map(t => t.colorName).filter(Boolean))) as string[];
-
   const filtered = trends.filter(t => {
-    if (cat    !== "all" && t.category !== cat) return false;
-    if (market !== "all" && t.market   !== market) return false;
-    if (brandFilter && t.brand !== brandFilter) return false;
-    if (colorFilter && t.colorName !== colorFilter) return false;
-    if (priceIdx > 0) {
-      const lo = t.priceMin ?? 0;
-      const hi = t.priceMax ?? t.priceMin ?? 0;
-      if (hi > 0 && (hi < priceRange.min || lo > priceRange.max)) return false;
+    if (cat !== "all" && t.category !== cat) return false;
+    if (secondary === "rising_only") {
+      const m = getMomentum(t.trendScore);
+      if (m?.label !== "Rising") return false;
     }
-    const q = search.toLowerCase();
-    if (q && !t.title.toLowerCase().includes(q) && !(t.description ?? "").toLowerCase().includes(q)) return false;
     return true;
   });
 
-  const autoCount   = filtered.filter(t => !t.isManual).length;
-  const manualCount = filtered.filter(t => t.isManual).length;
+  const savedCount  = saved.size;
+  const actingCount = 0;
+  const totalCount  = filtered.length;
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Trend Board</h1>
-          <p className="text-gray-500 text-sm">{filtered.length} trend items · {autoCount} auto · {manualCount} manual</p>
+          <h1 className="text-3xl font-bold text-gray-900">Trend board</h1>
+          <p className="text-gray-500 text-sm mt-0.5">
+            {totalCount} trends · {actingCount} acting on · {savedCount} saved
+            {lastRefresh && ` · last refresh ${formatDistanceToNow(lastRefresh)} ago`}
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           <button onClick={autoRefresh} disabled={refreshing}
-            className="btn-secondary flex items-center gap-2 text-sm">
-            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-            {refreshing ? "Refreshing…" : "Auto-Refresh Trends"}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50">
+            {refreshing ? "Refreshing…" : <>Auto-refresh <ArrowUpRight size={13} /></>}
           </button>
-          <button onClick={() => setModal(true)} className="btn-primary flex items-center gap-2">
-            <Plus size={16} /> Add Trend
+          <button onClick={() => setModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+            <Plus size={14} /> Add trend
           </button>
         </div>
       </div>
 
-      {refreshMsg && (
-        <div className={`p-3 rounded-lg text-sm ${refreshMsg.startsWith("✓") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
-          {refreshMsg}
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="space-y-2">
-        <div className="flex gap-3 flex-wrap items-center">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input className="input pl-8 w-48" placeholder="Search trends…" value={search} onChange={e => setSearch(e.target.value)} />
-          </div>
-          <div className="flex gap-1 flex-wrap">
-            {CATS.map(c => (
-              <button key={c} onClick={() => setCat(c)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
-                  cat === c ? "bg-brand-600 text-white" : "bg-white border border-gray-300 text-gray-600 hover:bg-gray-50"
-                }`}>{c}</button>
-            ))}
-          </div>
-          <div className="flex gap-1">
-            {MARKETS.map(m => (
-              <button key={m} onClick={() => setMarket(m)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  market === m ? "bg-gray-800 text-white" : "bg-white border border-gray-300 text-gray-600 hover:bg-gray-50"
-                }`}>{m}</button>
-            ))}
-          </div>
-          <button onClick={() => setShowFilters(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-              showFilters || brandFilter || colorFilter || priceIdx > 0
-                ? "bg-brand-50 text-brand-700 border-brand-200"
-                : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50"
+      {/* Filter pills */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {CATS.map(c => (
+          <button key={c} onClick={() => setCat(c)}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
+              cat === c
+                ? "bg-gray-900 text-white"
+                : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
             }`}>
-            <SlidersHorizontal size={13} /> More filters
+            {c === "all" ? "All" : c.charAt(0).toUpperCase() + c.slice(1)}
           </button>
-        </div>
-
-        {showFilters && (
-          <div className="flex gap-3 flex-wrap items-center p-3 bg-gray-50 rounded-xl">
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Brand</label>
-              <select className="input text-sm py-1.5 w-40" value={brandFilter} onChange={e => setBrand(e.target.value)}>
-                <option value="">All brands</option>
-                {brands.map(b => <option key={b} value={b}>{b}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Color</label>
-              <select className="input text-sm py-1.5 w-40" value={colorFilter} onChange={e => setColor(e.target.value)}>
-                <option value="">All colors</option>
-                {colors.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Price Range</label>
-              <select className="input text-sm py-1.5 w-44" value={priceIdx} onChange={e => setPriceIdx(Number(e.target.value))}>
-                {PRICE_RANGES.map((r, i) => <option key={i} value={i}>{r.label}</option>)}
-              </select>
-            </div>
-            {(brandFilter || colorFilter || priceIdx > 0) && (
-              <button onClick={() => { setBrand(""); setColor(""); setPriceIdx(0); }}
-                className="text-xs text-gray-500 hover:text-red-500 mt-4">Clear filters</button>
-            )}
-          </div>
-        )}
+        ))}
+        <div className="w-px h-5 bg-gray-200 mx-1" />
+        {SECONDARY.map(s => (
+          <button key={s} onClick={() => setSecondary(s)}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              secondary === s
+                ? "bg-gray-900 text-white"
+                : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+            }`}>
+            {SECONDARY_LABELS[s]}
+          </button>
+        ))}
       </div>
 
-      {/* Trend Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {filtered.map(t => (
-          <div key={t.id} className="card overflow-hidden hover:shadow-lg transition-shadow group">
-            <div className="aspect-square overflow-hidden bg-gray-100 flex items-center justify-center">
-              {trendPhotoUrl(t) ? (
-                <img
-                  src={trendPhotoUrl(t)!}
-                  alt={t.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  onError={e => { (e.target as HTMLImageElement).parentElement!.classList.add("bg-gradient-to-br", "from-gray-100", "to-gray-200"); (e.target as HTMLImageElement).style.display = "none"; }}
-                />
-              ) : (
-                <div className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center justify-center gap-2">
-                  <TrendingUp size={28} className="text-gray-300" />
-                  <span className="text-xs text-gray-400 capitalize">{t.category}</span>
-                </div>
-              )}
-            </div>
-            <div className="p-4">
-              <div className="flex items-start justify-between mb-2">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${CAT_COLORS[t.category] ?? "bg-gray-100 text-gray-600"}`}>
+      {/* Cards grid */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {filtered.map(t => {
+          const momentum = getMomentum(t.trendScore);
+          const isSaved  = saved.has(t.id);
+          const daysSeen = Math.floor((Date.now() - new Date(t.scrapedAt).getTime()) / 86_400_000);
+
+          return (
+            <div key={t.id} className="card overflow-hidden">
+              {/* Image / icon area */}
+              <div className="relative bg-[#f2ede4] flex items-center justify-center" style={{ height: 130 }}>
+                {t.imageUrl ? (
+                  <img src={t.imageUrl} alt={t.title} className="w-full h-full object-contain p-2" />
+                ) : (
+                  <CategoryIcon category={t.category} />
+                )}
+                <span className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${CAT_COLORS[t.category] ?? "bg-gray-100 text-gray-600"}`}>
                   {t.category}
                 </span>
-                <div className="flex items-center gap-1.5">
-                  {!t.isManual && <span title="Auto-generated"><Sparkles size={10} className="text-brand-400" /></span>}
-                  {t.market && <span className="text-xs text-gray-400 flex items-center gap-0.5"><Globe size={10} />{t.market}</span>}
-                  {t.rankPosition && <span className="text-xs font-bold text-brand-600">#{t.rankPosition}</span>}
-                </div>
-              </div>
-              <h3 className="font-semibold text-gray-900 text-sm leading-tight">{t.title}</h3>
-              {t.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{t.description}</p>}
-
-              {/* Brand / Color / Price tags */}
-              <div className="flex flex-wrap gap-1 mt-2">
-                {t.brand && <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{t.brand}</span>}
-                {t.colorName && <span className="text-[10px] bg-pink-50 text-pink-600 px-1.5 py-0.5 rounded">{t.colorName}</span>}
-                {(t.priceMin || t.priceMax) && (
-                  <span className="text-[10px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded font-medium">
-                    {t.priceMin && t.priceMax && t.priceMin !== t.priceMax
-                      ? `RM ${t.priceMin}–${t.priceMax}`
-                      : `RM ${t.priceMin ?? t.priceMax}`}
+                {momentum && (
+                  <span className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-medium ${momentum.cls}`}>
+                    {momentum.icon} {momentum.label}
                   </span>
                 )}
               </div>
 
-              {t.salesData && (
-                <div className="mt-2 bg-green-50 rounded-lg px-2 py-1.5 text-xs text-green-700">
-                  <span className="font-medium">Sales data: </span>{t.salesData}
+              {/* Content */}
+              <div className="p-3 space-y-1.5">
+                <div className="flex items-start justify-between gap-1">
+                  <h3 className="font-semibold text-gray-900 leading-tight text-sm">{t.title}</h3>
+                  {t.market && <span className="text-[10px] text-gray-400 shrink-0">{t.market}</span>}
                 </div>
-              )}
-              <div className="mt-3 flex items-center justify-between">
-                <div className="text-xs text-gray-400">
-                  {t.sourceName && <span>{t.sourceName}</span>}
-                  {t.season && <span className="ml-2">{t.season}</span>}
+
+                {t.description && (
+                  <p className="text-xs text-gray-500 line-clamp-2">{t.description}</p>
+                )}
+
+                <div className="flex items-center gap-1.5 text-[10px] text-gray-400 flex-wrap">
+                  {(t.priceMin || t.priceMax) && (
+                    <span>RM {t.priceMin ?? ""}{t.priceMin && t.priceMax && t.priceMin !== t.priceMax ? `–${t.priceMax}` : ""}</span>
+                  )}
+                  {(t.priceMin || t.priceMax) && t.sourceName && <span>·</span>}
+                  {t.sourceName && <span>{t.sourceName} · {t.isManual ? "manual" : "auto"}</span>}
                 </div>
-                {t.sourceUrl && (
-                  <a href={t.sourceUrl} target="_blank" rel="noopener noreferrer"
-                    className="text-xs text-brand-600 hover:text-brand-800 flex items-center gap-1">
-                    View source <ExternalLink size={10} />
+
+                {/* Actions */}
+                <div className="flex gap-1.5 pt-0.5">
+                  <a
+                    href={`/dashboard/samples/new?trendTitle=${encodeURIComponent(t.title)}&trendCategory=${encodeURIComponent(t.category)}`}
+                    className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 transition-colors">
+                    → Sample <ArrowUpRight size={10} />
                   </a>
+                  <button onClick={() => toggleSave(t.id)}
+                    className={`p-1.5 rounded-lg border transition-colors ${isSaved ? "border-amber-300 bg-amber-50 text-amber-500" : "border-gray-200 text-gray-400 hover:bg-gray-50"}`}>
+                    <Star size={13} fill={isSaved ? "currentColor" : "none"} />
+                  </button>
+                </div>
+
+                {isSaved ? (
+                  <p className="text-[10px] text-green-600">Saved</p>
+                ) : t.salesData ? (
+                  <p className="text-[10px] text-green-600">Acting on</p>
+                ) : (
+                  <p className="text-[10px] text-gray-400">Not yet acting</p>
                 )}
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
+
         {filtered.length === 0 && (
           <div className="col-span-4 card p-16 text-center text-gray-400">
-            <TrendingUp size={32} className="mx-auto mb-3 text-gray-300" />
-            <p className="font-medium">No trend items match your filters.</p>
-            <p className="text-sm mt-1">Try "Auto-Refresh Trends" to pull the latest data automatically.</p>
+            <p className="font-medium">No trends match your filters.</p>
+            <p className="text-sm mt-1">Try clicking Auto-refresh to pull the latest data.</p>
           </div>
         )}
       </div>
@@ -278,17 +283,17 @@ export default function TrendsPage() {
       {modal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="card w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
-            <h2 className="text-lg font-semibold mb-4">Add Trend Observation</h2>
+            <h2 className="text-lg font-semibold mb-4">Add trend observation</h2>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">Category *</label>
                   <select className="input" value={form.category} onChange={e => setForm(f=>({...f,category:e.target.value}))}>
-                    <option value="color">Color Trend</option>
-                    <option value="material">Material Trend</option>
-                    <option value="accessory">Accessory / Hardware</option>
-                    <option value="silhouette">Silhouette / Shape</option>
-                    <option value="style">Style / Design</option>
+                    <option value="color">Color</option>
+                    <option value="material">Material</option>
+                    <option value="accessory">Accessory</option>
+                    <option value="silhouette">Silhouette</option>
+                    <option value="style">Style</option>
                   </select>
                 </div>
                 <div>
@@ -297,66 +302,61 @@ export default function TrendsPage() {
                     <option value="MY">Malaysia</option>
                     <option value="TH">Thailand</option>
                     <option value="GLOBAL">Global</option>
-                    <option value="CN">China</option>
                   </select>
                 </div>
               </div>
               <div>
-                <label className="label">Trend Title *</label>
-                <input className="input" value={form.title} onChange={e => setForm(f=>({...f,title:e.target.value}))} placeholder="e.g. Bow Embellishment Flats" />
+                <label className="label">Trend title *</label>
+                <input className="input" value={form.title} onChange={e => setForm(f=>({...f,title:e.target.value}))} placeholder="e.g. Mary Jane revival" />
               </div>
               <div>
                 <label className="label">Description</label>
-                <textarea className="input" rows={2} value={form.description} onChange={e => setForm(f=>({...f,description:e.target.value}))}
-                  placeholder="Why it's trending, key design elements…" />
+                <textarea className="input" rows={2} value={form.description} onChange={e => setForm(f=>({...f,description:e.target.value}))} placeholder="Why it's trending, key design elements…" />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Brand</label>
-                  <input className="input" value={form.brand} onChange={e => setForm(f=>({...f,brand:e.target.value}))} placeholder="Zara, H&M, Charles & Keith…" />
-                </div>
-                <div>
-                  <label className="label">Primary Color</label>
-                  <input className="input" value={form.colorName} onChange={e => setForm(f=>({...f,colorName:e.target.value}))} placeholder="Butter Yellow" />
-                </div>
                 <div>
                   <label className="label">Price Min (RM)</label>
                   <input className="input" type="number" value={form.priceMin} onChange={e => setForm(f=>({...f,priceMin:e.target.value}))} placeholder="89" />
                 </div>
                 <div>
                   <label className="label">Price Max (RM)</label>
-                  <input className="input" type="number" value={form.priceMax} onChange={e => setForm(f=>({...f,priceMax:e.target.value}))} placeholder="149" />
+                  <input className="input" type="number" value={form.priceMax} onChange={e => setForm(f=>({...f,priceMax:e.target.value}))} placeholder="199" />
+                </div>
+                <div>
+                  <label className="label">Source name</label>
+                  <input className="input" value={form.sourceName} onChange={e => setForm(f=>({...f,sourceName:e.target.value}))} placeholder="Zalora, Lyst…" />
+                </div>
+                <div>
+                  <label className="label">Trend score (0–100)</label>
+                  <input className="input" type="number" min="0" max="100" value={form.trendScore} onChange={e => setForm(f=>({...f,trendScore:e.target.value}))} placeholder="65" />
+                </div>
+                <div>
+                  <label className="label">Brand</label>
+                  <input className="input" value={form.brand} onChange={e => setForm(f=>({...f,brand:e.target.value}))} placeholder="Zara, H&M…" />
+                </div>
+                <div>
+                  <label className="label">Primary color</label>
+                  <input className="input" value={form.colorName} onChange={e => setForm(f=>({...f,colorName:e.target.value}))} placeholder="Butter Yellow" />
+                </div>
+                <div>
+                  <label className="label">Product image URL</label>
+                  <input className="input" value={form.imageUrl} onChange={e => setForm(f=>({...f,imageUrl:e.target.value}))} placeholder="https://…" />
                 </div>
                 <div>
                   <label className="label">Source URL</label>
                   <input className="input" type="url" value={form.sourceUrl} onChange={e => setForm(f=>({...f,sourceUrl:e.target.value}))} placeholder="https://…" />
                 </div>
-                <div>
-                  <label className="label">Source Name</label>
-                  <input className="input" value={form.sourceName} onChange={e => setForm(f=>({...f,sourceName:e.target.value}))} placeholder="Pinterest, Lyst…" />
-                </div>
-                <div>
-                  <label className="label">Product Image URL</label>
-                  <input className="input" value={form.imageUrl} onChange={e => setForm(f=>({...f,imageUrl:e.target.value}))} placeholder="https://…" />
-                </div>
-                <div>
-                  <label className="label">Rank Position</label>
-                  <input className="input" type="number" value={form.rankPosition} onChange={e => setForm(f=>({...f,rankPosition:e.target.value}))} placeholder="1" />
-                </div>
               </div>
               <div>
-                <label className="label">Sales Volume / Data</label>
-                <textarea className="input" rows={2} value={form.salesData} onChange={e => setForm(f=>({...f,salesData:e.target.value}))}
-                  placeholder="e.g. #1 best-seller on Zalora MY past 30 days, 2.3k sold" />
-              </div>
-              <div>
-                <label className="label">Season</label>
-                <input className="input" value={form.season} onChange={e => setForm(f=>({...f,season:e.target.value}))} placeholder="SS2026" />
+                <label className="label">Sales data / notes</label>
+                <textarea className="input" rows={2} value={form.salesData} onChange={e => setForm(f=>({...f,salesData:e.target.value}))} placeholder="e.g. Sample SR-2026-001" />
               </div>
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setModal(false)} className="btn-secondary flex-1">Cancel</button>
-              <button onClick={save} className="btn-primary flex-1" disabled={saving||!form.title}>{saving?"Saving…":"Add Trend"}</button>
+              <button onClick={addTrend} className="btn-primary flex-1" disabled={saving || !form.title}>
+                {saving ? "Saving…" : "Add trend"}
+              </button>
             </div>
           </div>
         </div>

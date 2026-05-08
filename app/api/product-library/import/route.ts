@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
         libNumber,
         productName: String(r.productName ?? ""),
         h2uSku:       r.h2uSku       ? String(r.h2uSku)       : null,
+        mainSku:      r.mainSku      ? String(r.mainSku)      : null,
         supplierSku:  r.supplierSku  ? String(r.supplierSku)  : null,
         brand:        r.brand        ? String(r.brand)        : null,
         category:     r.category     ? String(r.category)     : null,

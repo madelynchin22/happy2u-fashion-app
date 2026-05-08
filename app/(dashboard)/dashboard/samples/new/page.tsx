@@ -22,6 +22,13 @@ function plusDays(n: number) {
   return d.toISOString().split("T")[0];
 }
 
+const PRESET_COLORS = [
+  { name: "Black",    hex: "#1a1a1a" },
+  { name: "Beige",    hex: "#D4B896" },
+  { name: "Espresso", hex: "#3C1414" },
+  { name: "White",    hex: "#F4F4F4" },
+];
+
 const MATERIALS_ROWS = [
   { key: "materialUpper",   label: "Upper (鞋面)" },
   { key: "materialLining",  label: "Lining (内里)" },
@@ -82,11 +89,73 @@ function PhotoUpload({ url, onChange }: { url: string; onChange: (url: string) =
   );
 }
 
+function MainPhotoUpload({ url, onChange }: { url: string; onChange: (url: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFile(file: File) {
+    setUploading(true);
+    const u = await uploadFile(file);
+    onChange(u);
+    setUploading(false);
+  }
+
+  if (url) {
+    return (
+      <div className="relative group w-48 h-48 flex-shrink-0">
+        <img src={url} alt="Main design" className="w-48 h-48 object-cover rounded-xl border border-gray-200" />
+        <button onClick={() => onChange("")}
+          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full hidden group-hover:flex items-center justify-center">
+          <X size={11} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <button onClick={() => ref.current?.click()}
+        className="w-48 h-48 flex-shrink-0 rounded-xl border-2 border-dashed border-gray-200 hover:border-brand-400 flex flex-col items-center justify-center gap-2 text-gray-400 hover:text-brand-500 transition-colors">
+        {uploading
+          ? <span className="text-sm">Uploading…</span>
+          : <><Upload size={22} /><span className="text-sm font-medium">Upload photo</span><span className="text-xs text-gray-300">JPG · PNG · WebP</span></>}
+      </button>
+      <input ref={ref} type="file" accept="image/*" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+    </>
+  );
+}
+
 export default function NewSamplePage() {
   const router = useRouter();
-  const [mfrs, setMfrs]     = useState<Manufacturer[]>([]);
-  const [saving, setSaving] = useState(false);
+  const [mfrs, setMfrs]       = useState<Manufacturer[]>([]);
+  const [saving, setSaving]   = useState(false);
   const [refPreview, setRefPreview] = useState("SR-XXXX-XXX");
+  const [selectedColors, setSelectedColors] = useState<{ name: string; hex: string; code: string }[]>([]);
+  const [customColorInput, setCustomColorInput] = useState("");
+
+  function toggleColor(color: { name: string; hex: string; code?: string }) {
+    setSelectedColors(prev =>
+      prev.find(c => c.name === color.name)
+        ? prev.filter(c => c.name !== color.name)
+        : [...prev, { name: color.name, hex: color.hex, code: color.code ?? "" }]
+    );
+  }
+
+  function setColorCode(name: string, code: string) {
+    setSelectedColors(prev => prev.map(c => c.name === name ? { ...c, code: code.toUpperCase() } : c));
+  }
+
+  function addCustomColor() {
+    const name = customColorInput.trim();
+    if (!name) return;
+    if (selectedColors.find(c => c.name.toLowerCase() === name.toLowerCase())) {
+      setCustomColorInput("");
+      return;
+    }
+    setSelectedColors(prev => [...prev, { name, hex: "#CBD5E1", code: "" }]);
+    setCustomColorInput("");
+  }
 
   const [form, setForm] = useState({
     brand: "Happy2U",
@@ -126,13 +195,16 @@ export default function NewSamplePage() {
       return;
     }
     setSaving(true);
+    const firstColor = selectedColors[0]?.name ?? "";
     const payload = {
-      productName: [form.brand, form.colorName].filter(Boolean).join(" ") || "Sample",
+      productName: [form.brand, firstColor].filter(Boolean).join(" ") || "Sample",
       brand: form.brand, season: "",
-      sampleSize: form.sampleSize, lastModel: form.lastModel,
+      sampleSize: form.sampleSize,
       dateSent: form.dateSent || null, deadline: form.deadline || null,
       manufacturerId: form.manufacturerId,
-      colorName: form.colorName, colorCode: form.colorCode,
+      colorName: firstColor,
+      colorCode: selectedColors[0]?.code || null,
+      colorVariants: selectedColors.length > 0 ? JSON.stringify(selectedColors) : null,
       materialUpper: form.materialUpper,
       materialUpperRemark: form.materialUpper_remark,
       materialUpperPhoto: form.materialUpper_photo,
@@ -168,10 +240,9 @@ export default function NewSamplePage() {
     const res = await fetch("/api/samples", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     });
-    setSaving(false);
     if (res.ok) {
-      const data = await res.json();
-      router.push(`/dashboard/samples/${data.id}`);
+      setSaving(false);
+      router.push("/dashboard/samples");
     } else {
       let errMsg = `HTTP ${res.status}`;
       try {
@@ -182,6 +253,7 @@ export default function NewSamplePage() {
       } catch {
         // response was not JSON
       }
+      setSaving(false);
       alert(`Failed to save (${errMsg})`);
     }
   }
@@ -233,33 +305,119 @@ export default function NewSamplePage() {
               {["35","36","37","38","39","40","41","42"].map(s => <option key={s} value={s}>EU {s}</option>)}
             </select>
           </div>
-          <div>
-            <label className="label">Last Model</label>
-            <input className="input" value={form.lastModel} onChange={e => set("lastModel", e.target.value)} placeholder="SR-2026-001" />
-          </div>
-          <div>
-            <label className="label">Date Sent</label>
-            <input className="input" type="date" value={form.dateSent} onChange={e => set("dateSent", e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Deadline</label>
-            <input className="input" type="date" value={form.deadline} onChange={e => set("deadline", e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Color Name</label>
-            <input className="input" value={form.colorName} onChange={e => set("colorName", e.target.value)} placeholder="BEIGE" />
-          </div>
-          <div>
-            <label className="label">Color Code (色号)</label>
-            <input className="input" value={form.colorCode} onChange={e => set("colorCode", e.target.value)} placeholder="262" />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Date Sent</label>
+              <input className="input" type="date" value={form.dateSent} onChange={e => set("dateSent", e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Deadline</label>
+              <input className="input" type="date" value={form.deadline} onChange={e => set("deadline", e.target.value)} />
+            </div>
           </div>
         </div>
-        <p className="text-xs text-gray-400 mt-4">
-          💡 Supplier SKU and H2U SKU will be filled in after sample is received and when Purchase Order is placed.
-        </p>
+
+        {/* Colour selector */}
+        <div className="mt-5">
+          <label className="label mb-2">Colours &amp; SKU Codes</label>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {PRESET_COLORS.map(c => {
+              const checked = !!selectedColors.find(s => s.name === c.name);
+              return (
+                <button
+                  key={c.name}
+                  type="button"
+                  onClick={() => toggleColor(c)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all ${
+                    checked
+                      ? "border-gray-800 bg-gray-900 text-white"
+                      : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
+                  }`}
+                >
+                  <span className="w-3.5 h-3.5 rounded-full border border-gray-300 flex-shrink-0"
+                    style={{ backgroundColor: c.hex }} />
+                  {c.name}
+                  {checked && <X size={12} className="ml-0.5 opacity-70" />}
+                </button>
+              );
+            })}
+            {/* Custom colours added */}
+            {selectedColors.filter(c => !PRESET_COLORS.find(p => p.name === c.name)).map(c => (
+              <button
+                key={c.name}
+                type="button"
+                onClick={() => toggleColor(c)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-white text-sm font-medium"
+              >
+                <span className="w-3.5 h-3.5 rounded-full border border-gray-500 flex-shrink-0"
+                  style={{ backgroundColor: c.hex }} />
+                {c.name}
+                <X size={12} className="ml-0.5 opacity-70" />
+              </button>
+            ))}
+          </div>
+
+          {/* Add custom colour */}
+          <div className="flex items-center gap-2">
+            <input
+              className="input text-sm w-48"
+              placeholder="Add custom colour…"
+              value={customColorInput}
+              onChange={e => setCustomColorInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addCustomColor(); } }}
+            />
+            <button
+              type="button"
+              onClick={addCustomColor}
+              disabled={!customColorInput.trim()}
+              className="px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              + Add
+            </button>
+          </div>
+
+          {/* Per-colour code inputs */}
+          {selectedColors.length > 0 && (
+            <div className="mt-4 bg-gray-50 rounded-xl p-4 space-y-3">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                Colour codes <span className="font-normal text-gray-400">(optional — assign the SKU letter for each colour)</span>
+              </p>
+              <div className="space-y-2">
+                {selectedColors.map(c => (
+                  <div key={c.name} className="flex items-center gap-3">
+                    <span className="w-3.5 h-3.5 rounded-full border border-gray-300 flex-shrink-0" style={{ backgroundColor: c.hex }} />
+                    <span className="text-sm font-medium text-gray-700 w-24 shrink-0">{c.name}</span>
+                    <input
+                      className="input font-mono text-sm w-20"
+                      placeholder="e.g. H"
+                      maxLength={4}
+                      value={c.code}
+                      onChange={e => setColorCode(c.name, e.target.value)}
+                    />
+                    {c.code && <span className="text-xs text-gray-400">code saved with colour</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* ── Section 2: Material Specifications ───────────────────────── */}
+      {/* ── Section 2: Main Design Photo ─────────────────────────────── */}
+      <div className="card p-6">
+        <h2 className="font-semibold text-gray-900 mb-1">Main Design Photo</h2>
+        <p className="text-xs text-gray-400 mb-4">Upload the primary shoe design photo — this will appear in the sample order list.</p>
+        <div className="flex items-start gap-6">
+          <MainPhotoUpload url={form.photoSideUrl} onChange={url => set("photoSideUrl", url)} />
+          <div className="text-sm text-gray-400 pt-2 space-y-1 leading-relaxed">
+            <p className="text-gray-600 font-medium">Recommended: side view of the shoe</p>
+            <p>This photo shows as the thumbnail in the sample order list so the team can identify the design at a glance.</p>
+            <p>You can also upload additional view photos (back, front, platform, heel) in the Product Views section below.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Section 3: Material Specifications ───────────────────────── */}
       <div className="card p-6">
         <h2 className="font-semibold text-gray-900 mb-1">Material Specifications</h2>
         <p className="text-xs text-gray-400 mb-4">Specify material for each component. Add a remark or attach a reference photo per row.</p>
@@ -294,7 +452,7 @@ export default function NewSamplePage() {
         </div>
       </div>
 
-      {/* ── Section 3: Product Views & Notes ──────────────────────────── */}
+      {/* ── Section 4: Product Views & Notes ──────────────────────────── */}
       <div className="card p-6">
         <h2 className="font-semibold text-gray-900 mb-1">Product Views & Notes</h2>
         <p className="text-xs text-gray-400 mb-4">Upload product reference photos per view. Add notes for the manufacturer for each angle.</p>
@@ -319,7 +477,7 @@ export default function NewSamplePage() {
         </div>
       </div>
 
-      {/* ── Section 4: Design & IP Notes ─────────────────────────────── */}
+      {/* ── Section 5: Design & IP Notes ─────────────────────────────── */}
       <div className="card p-6">
         <h2 className="font-semibold text-gray-900 mb-1">Design Changes & IP Notes</h2>
         <p className="text-xs text-gray-400 mb-4">Document all design modifications for legal IP protection.</p>

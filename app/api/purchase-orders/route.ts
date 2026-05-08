@@ -9,12 +9,45 @@ export async function GET() {
 
   const pos = await prisma.purchaseOrder.findMany({
     include: {
-      manufacturer: { select: { id: true, name: true } },
+      manufacturer: { select: { id: true, name: true, leadTimeDays: true, rating: true } },
       _count: { select: { items: true } },
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: { date: "desc" },
   });
-  return NextResponse.json(pos);
+
+  // Attach shoe photo and product name from the linked sample order (sampleOrderId stores the order number)
+  const orderNumbers = [...new Set(pos.map(p => p.sampleOrderId).filter(Boolean))] as string[];
+  const samples = orderNumbers.length
+    ? await prisma.sampleOrder.findMany({
+        where: { orderNumber: { in: orderNumbers } },
+        select: { id: true, orderNumber: true, photoSideUrl: true },
+      })
+    : [];
+  const samplePhotoMap = new Map(samples.map(s => [s.orderNumber, s.photoSideUrl]));
+
+  // Look up ProductLibrary product name per sample order
+  const sampleUuids = samples.map(s => s.id);
+  const libEntries = sampleUuids.length
+    ? await prisma.productLibrary.findMany({
+        where: { sampleOrderId: { in: sampleUuids } },
+        select: { sampleOrderId: true, productName: true },
+      })
+    : [];
+  const libNameByUuid = new Map<string, string>();
+  for (const l of libEntries) {
+    if (l.sampleOrderId && !libNameByUuid.has(l.sampleOrderId)) {
+      libNameByUuid.set(l.sampleOrderId, l.productName);
+    }
+  }
+  const libProductMap = new Map(samples.map(s => [s.orderNumber, libNameByUuid.get(s.id) ?? null]));
+
+  const result = pos.map(p => ({
+    ...p,
+    photoUrl: p.sampleOrderId ? (samplePhotoMap.get(p.sampleOrderId) ?? null) : null,
+    libProductName: p.sampleOrderId ? (libProductMap.get(p.sampleOrderId) ?? null) : null,
+  }));
+
+  return NextResponse.json(result);
 }
 
 export async function POST(req: NextRequest) {
@@ -24,14 +57,18 @@ export async function POST(req: NextRequest) {
 
     const { items, date, deliveryDate, ...poData } = await req.json();
 
-    // Auto-generate PO number: APR-01, APR-02, etc.
-    const monthAbbr = new Date().toLocaleString("en", { month: "short" }).toUpperCase();
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1); startOfMonth.setHours(0, 0, 0, 0);
-    const countThisMonth = await prisma.purchaseOrder.count({
-      where: { createdAt: { gte: startOfMonth } },
-    });
-    const poNumber = `${monthAbbr}-${String(countThisMonth + 1).padStart(2, "0")}`;
+    // Resolve user ID by email to avoid stale JWT issues after DB resets
+    const dbUser = await prisma.user.findUnique({ where: { email: session.user!.email! } });
+    const createdById = dbUser?.id ?? null;
+
+    // Auto-generate PO number: PO-2026-MAY01 (sequential within the month)
+    const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+    const refDate = date ? new Date(date) : new Date();
+    const year = refDate.getFullYear();
+    const monthAbbr = MONTHS[refDate.getMonth()];
+    const prefix = `PO-${year}-${monthAbbr}`;
+    const monthCount = await prisma.purchaseOrder.count({ where: { poNumber: { startsWith: prefix } } });
+    const poNumber = `${prefix}${String(monthCount + 1).padStart(2, "0")}`;
 
     // Sanitize items — only keep known fields
     const cleanItems = (items ?? []).map((item: any) => ({
@@ -50,6 +87,7 @@ export async function POST(req: NextRequest) {
       remark:          item.remark           ?? null,
       photoUrl:        item.photoUrl         ?? null,
       deliveryDate:    item.deliveryDate ? new Date(item.deliveryDate) : null,
+      qty35:  Number(item.qty35)  || 0,
       qty36:  Number(item.qty36)  || 0,
       qty37:  Number(item.qty37)  || 0,
       qty38:  Number(item.qty38)  || 0,
@@ -60,17 +98,31 @@ export async function POST(req: NextRequest) {
       totalPairs:    Number(item.totalPairs)    || 0,
       discountPrice: item.discountPrice != null ? Number(item.discountPrice) : null,
       lineTotal:     Number(item.lineTotal)     || 0,
+      outletAllocations: item.outletAllocations   ?? null,
     }));
 
     const po = await prisma.purchaseOrder.create({
       data: {
         poNumber,
-        brand:          poData.brand          ?? "Happy2U",
-        manufacturerId: poData.manufacturerId,
-        notes:          poData.notes          ?? null,
-        date:           date ? new Date(date) : new Date(),
-        deliveryDate:   deliveryDate ? new Date(deliveryDate) : null,
-        createdById:    (session.user as any).id,
+        brand:           poData.brand           ?? "Happy2U",
+        productName:     poData.productName      ?? null,
+        manufacturerId:  poData.manufacturerId,
+        notes:           poData.notes            ?? null,
+        poType:          poData.poType           ?? null,
+        sampleOrderId:   poData.sampleOrderId    ?? null,
+        parentPoNumber:  poData.parentPoNumber   ?? null,
+        destination:     poData.destination      ?? null,
+        paymentTerms:    poData.paymentTerms     ?? null,
+        paymentIncoterm: poData.paymentIncoterm  ?? null,
+        fxRate:          poData.fxRate != null ? Number(poData.fxRate) : null,
+        sizeCurveInsight: poData.sizeCurveInsight ?? null,
+        allocations:     poData.allocations      ?? null,
+        date:            date ? new Date(date) : new Date(),
+        deliveryDate:    deliveryDate ? new Date(deliveryDate) : null,
+        productionStartDate: poData.productionStartDate ? new Date(poData.productionStartDate) : null,
+        qcDate:          poData.qcDate  ? new Date(poData.qcDate)  : null,
+        shipDate:        poData.shipDate ? new Date(poData.shipDate) : null,
+        createdById,
         items: cleanItems.length > 0 ? { create: cleanItems } : undefined,
       },
       include: { items: true, manufacturer: true },
@@ -122,6 +174,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ...po, totalPairs, totalPrice }, { status: 201 });
   } catch (err: any) {
     console.error("POST /api/purchase-orders error:", err);
-    return NextResponse.json({ error: err?.message ?? "Failed to create PO" }, { status: 500 });
+    // Extract the last few lines of Prisma error (after the data dump) for a readable message
+    const fullMsg: string = err?.message ?? "Failed to create PO";
+    const lines = fullMsg.split("\n").map((l: string) => l.trim()).filter(Boolean);
+    const lastLines = lines.slice(-5).join(" | ");
+    return NextResponse.json({ error: lastLines || fullMsg }, { status: 500 });
   }
 }

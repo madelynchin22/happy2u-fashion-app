@@ -1,21 +1,36 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState, useEffect } from "react";
 import { signOut, useSession } from "next-auth/react";
 import {
   LayoutDashboard, Building2, Layers, ClipboardList, ShoppingCart,
   Container, PackageCheck, TrendingUp, Settings, LogOut, ChevronRight,
-  Sparkles, Star, PackageSearch, BookOpen,
+  Sparkles, Star, PackageSearch, BookOpen, CreditCard, AlertTriangle, Store,
 } from "lucide-react";
 
-const nav = [
+type NavChild = { href: string; label: string };
+type NavItem =
+  | { divider: true }
+  | { href: string; label: string; icon: any; children?: NavChild[] };
+
+const nav: NavItem[] = [
   { href: "/dashboard",            label: "Dashboard",       icon: LayoutDashboard },
   { href: "/dashboard/trends",     label: "Trend Board",     icon: TrendingUp },
   { href: "/dashboard/competitors",    label: "Competitor Monitor", icon: PackageSearch },
   { href: "/dashboard/ai-suggestions", label: "AI Suggestions", icon: Sparkles },
   { href: "/dashboard/best-sellers",   label: "Best Sellers",   icon: Star },
   { href: "/dashboard/samples",    label: "Sample Orders",   icon: ClipboardList },
-  { href: "/dashboard/purchase-orders", label: "Purchase Orders", icon: ShoppingCart },
+  {
+    href: "/dashboard/purchase-orders",
+    label: "Purchase Orders",
+    icon: ShoppingCart,
+    children: [
+      { href: "/dashboard/purchase-orders/payment-tracking", label: "Payment Tracking" },
+      { href: "/dashboard/purchase-orders/defect-list",      label: "Defect List" },
+      { href: "/dashboard/purchase-orders/outlet-receipt",   label: "Outlet Receipt Submit" },
+    ],
+  },
   { href: "/dashboard/shipments",  label: "Shipments",       icon: Container },
   { href: "/dashboard/deliveries", label: "Deliveries & QC", icon: PackageCheck },
   { divider: true },
@@ -25,10 +40,32 @@ const nav = [
   { href: "/dashboard/settings",   label: "Settings",        icon: Settings },
 ];
 
+const CHILD_ICONS: Record<string, any> = {
+  "/dashboard/purchase-orders/payment-tracking": CreditCard,
+  "/dashboard/purchase-orders/defect-list":      AlertTriangle,
+  "/dashboard/purchase-orders/outlet-receipt":   Store,
+};
+
 export function Sidebar() {
   const pathname = usePathname();
   const { data: session } = useSession();
   const role = (session?.user as any)?.role ?? "";
+
+  // Auto-expand Purchase Orders if on any of its sub-routes
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => ({
+    "/dashboard/purchase-orders": pathname.startsWith("/dashboard/purchase-orders"),
+  }));
+
+  // Keep expanded in sync when navigating directly via URL
+  useEffect(() => {
+    if (pathname.startsWith("/dashboard/purchase-orders")) {
+      setExpanded(prev => ({ ...prev, "/dashboard/purchase-orders": true }));
+    }
+  }, [pathname]);
+
+  function toggleExpand(href: string) {
+    setExpanded(prev => ({ ...prev, [href]: !prev[href] }));
+  }
 
   return (
     <aside className="w-60 min-h-screen flex flex-col border-r border-[#e8ddd2]" style={{ backgroundColor: "#f1e8de" }}>
@@ -44,21 +81,68 @@ export function Sidebar() {
         {nav.map((item, i) => {
           if ("divider" in item) return <div key={i} className="my-3 border-t border-gray-100" />;
           const Icon = item.icon;
-          const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
+          const isParent = !!item.children;
+          const isExpanded = expanded[item.href];
+          const active = pathname === item.href || (!isParent && item.href !== "/dashboard" && pathname.startsWith(item.href));
+          const childActive = isParent && pathname.startsWith(item.href);
+
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                active
-                  ? "bg-white text-brand-700 font-medium shadow-sm"
-                  : "text-gray-600 hover:bg-white/60 hover:text-gray-900"
-              }`}
-            >
-              <Icon size={16} />
-              <span className="flex-1">{item.label}</span>
-              {active && <ChevronRight size={14} className="text-brand-400" />}
-            </Link>
+            <div key={item.href}>
+              {/* Parent row */}
+              <div
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
+                  active || (childActive && !isExpanded)
+                    ? "bg-white text-brand-700 font-medium shadow-sm"
+                    : childActive
+                    ? "bg-white/60 text-brand-700 font-medium"
+                    : "text-gray-600 hover:bg-white/60 hover:text-gray-900"
+                }`}
+                onClick={() => isParent ? toggleExpand(item.href) : undefined}
+              >
+                {isParent ? (
+                  <>
+                    <Icon size={16} />
+                    <Link href={item.href} className="flex-1" onClick={e => e.stopPropagation()}>
+                      {item.label}
+                    </Link>
+                    <ChevronRight
+                      size={14}
+                      className={`text-brand-400 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                    />
+                  </>
+                ) : (
+                  <Link href={item.href} className="flex items-center gap-3 flex-1">
+                    <Icon size={16} />
+                    <span className="flex-1">{item.label}</span>
+                    {active && <ChevronRight size={14} className="text-brand-400" />}
+                  </Link>
+                )}
+              </div>
+
+              {/* Sub-items */}
+              {isParent && isExpanded && (
+                <div className="ml-4 mt-0.5 space-y-0.5 border-l-2 border-brand-100 pl-3">
+                  {item.children!.map(child => {
+                    const childIsActive = pathname === child.href || pathname.startsWith(child.href);
+                    const ChildIcon = CHILD_ICONS[child.href];
+                    return (
+                      <Link
+                        key={child.href}
+                        href={child.href}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors ${
+                          childIsActive
+                            ? "bg-white text-brand-700 font-medium shadow-sm"
+                            : "text-gray-500 hover:bg-white/60 hover:text-gray-800"
+                        }`}
+                      >
+                        {ChildIcon && <ChildIcon size={13} />}
+                        <span>{child.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })}
       </nav>

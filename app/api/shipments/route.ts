@@ -17,8 +17,18 @@ export async function GET() {
   const shipments = await prisma.shipment.findMany({
     where,
     include: {
-      destination: { select: { id: true, name: true, marking: true, country: true } },
-      items: { include: { po: { select: { poNumber: true } } } },
+      destination: { select: { id: true, name: true, marking: true, country: true, address: true } },
+      items: {
+        include: {
+          po: {
+            select: {
+              poNumber: true, productName: true, totalPairs: true,
+              manufacturer: { select: { name: true } },
+            },
+          },
+        },
+      },
+      events: { orderBy: { eventDate: "asc" } },
       _count: { select: { events: true } },
     },
     orderBy: { createdAt: "desc" },

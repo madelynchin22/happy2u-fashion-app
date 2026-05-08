@@ -1,15 +1,24 @@
 import React from "react";
-import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, Text, View, StyleSheet, Font } from "@react-pdf/renderer";
+import { join } from "path";
+
+Font.register({
+  family: "NotoSansSC",
+  fonts: [
+    { src: join(process.cwd(), "public/fonts/NotoSansSC-Regular.otf"), fontWeight: "normal" },
+    { src: join(process.cwd(), "public/fonts/NotoSansSC-Bold.otf"),    fontWeight: "bold"   },
+  ],
+});
 
 const S = StyleSheet.create({
-  page:      { fontFamily: "Helvetica", fontSize: 8, padding: "18 22", color: "#1a1a1a" },
+  page:      { fontFamily: "NotoSansSC", fontSize: 8, padding: "18 22", color: "#1a1a1a" },
   header:    { flexDirection: "row", justifyContent: "space-between", borderBottom: "2pt solid #d03070", paddingBottom: 8, marginBottom: 10 },
-  logoText:  { fontSize: 18, fontFamily: "Helvetica-Bold", color: "#d03070" },
-  docTitle:  { fontSize: 11, fontFamily: "Helvetica-Bold", color: "#374151", marginTop: 2 },
+  logoText:  { fontSize: 18, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" },
+  docTitle:  { fontSize: 11, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#374151", marginTop: 2 },
   summaryBox:{ alignItems: "flex-end" },
   metaRow:   { flexDirection: "row", gap: 4, marginBottom: 2 },
   metaLabel: { color: "#888", width: 70, textAlign: "right" },
-  metaValue: { fontFamily: "Helvetica-Bold" },
+  metaValue: { fontFamily: "NotoSansSC", fontWeight: "bold" },
   // Summary table (top-right: outlet → total pairs)
   summaryTable: { border: "0.5pt solid #e5e7eb", marginBottom: 10 },
   stRow:     { flexDirection: "row", borderBottom: "0.5pt solid #e5e7eb" },
@@ -18,7 +27,7 @@ const S = StyleSheet.create({
   // Main table
   table:     { },
   thead:     { flexDirection: "row", backgroundColor: "#1a1a1a" },
-  th:        { color: "white", padding: "4 4", fontFamily: "Helvetica-Bold", fontSize: 7, borderRight: "0.5pt solid #555" },
+  th:        { color: "white", padding: "4 4", fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, borderRight: "0.5pt solid #555" },
   tr:        { flexDirection: "row", borderBottom: "0.5pt solid #e5e7eb" },
   trAlt:     { backgroundColor: "#fdf4f7" },
   td:        { padding: "3 4", borderRight: "0.5pt solid #e5e7eb" },
@@ -29,11 +38,11 @@ const S = StyleSheet.create({
   cColor:    { width: 40 },
   cMarking:  { width: 68 },
   cSize:     { width: 18, textAlign: "center" },
-  cPairs:    { width: 24, textAlign: "center", fontFamily: "Helvetica-Bold" },
+  cPairs:    { width: 24, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" },
   cDate:     { width: 40 },
   cRemark:   { flex: 1 },
   totalRow:  { flexDirection: "row", backgroundColor: "#1a1a1a", borderBottom: "0.5pt solid #333" },
-  totalLabel:{ color: "white", fontFamily: "Helvetica-Bold", padding: "3 4" },
+  totalLabel:{ color: "white", fontFamily: "NotoSansSC", fontWeight: "bold", padding: "3 4" },
   footer:    { position: "absolute", bottom: 14, left: 22, right: 22, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: "#aaa", borderTop: "0.5pt solid #e5e7eb", paddingTop: 4 },
 });
 
@@ -70,18 +79,18 @@ export function PackingListPDF({ po, outlets }: { po: any; outlets: any[] }) {
             {/* Outlet summary box */}
             <View style={[S.summaryTable, { marginTop: 6 }]}>
               <View style={[S.stRow, S.stHead]}>
-                <Text style={[S.stCell, { width: 90, fontFamily: "Helvetica-Bold", fontSize: 7, color: "#d03070" }]}>Outlet Marking</Text>
-                <Text style={[S.stCell, { width: 40, fontFamily: "Helvetica-Bold", fontSize: 7, textAlign: "right", color: "#d03070" }]}>Pairs</Text>
+                <Text style={[S.stCell, { width: 90, fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, color: "#d03070" }]}>Outlet Marking</Text>
+                <Text style={[S.stCell, { width: 40, fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, textAlign: "right", color: "#d03070" }]}>Pairs</Text>
               </View>
               {Object.entries(outletTotals).map(([marking, pairs]) => (
                 <View key={marking} style={S.stRow}>
                   <Text style={[S.stCell, { width: 90 }]}>{marking}</Text>
-                  <Text style={[S.stCell, { width: 40, textAlign: "right", fontFamily: "Helvetica-Bold" }]}>{pairs}</Text>
+                  <Text style={[S.stCell, { width: 40, textAlign: "right", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{pairs}</Text>
                 </View>
               ))}
               <View style={[S.stRow, { backgroundColor: "#1a1a1a" }]}>
-                <Text style={[S.stCell, { width: 90, color: "white", fontFamily: "Helvetica-Bold" }]}>TOTAL</Text>
-                <Text style={[S.stCell, { width: 40, textAlign: "right", color: "white", fontFamily: "Helvetica-Bold" }]}>{grandTotal}</Text>
+                <Text style={[S.stCell, { width: 90, color: "white", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>TOTAL</Text>
+                <Text style={[S.stCell, { width: 40, textAlign: "right", color: "white", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{grandTotal}</Text>
               </View>
             </View>
           </View>
@@ -125,15 +134,15 @@ export function PackingListPDF({ po, outlets }: { po: any; outlets: any[] }) {
             const itemTotal = plItems.reduce((s: number, p: any) => s + p.totalPairs, 0);
             rows.push(
               <View key={`${item.id}-total`} style={[S.tr, { backgroundColor: "#f9fafb" }]}>
-                <Text style={[S.td, S.cSku, { fontFamily: "Helvetica-Bold" }]}>{item.supplierSku}</Text>
-                <Text style={[S.td, S.cH2u, { fontFamily: "Helvetica-Bold" }]}>{item.h2uSku}</Text>
-                <Text style={[S.td, S.cColor, { fontFamily: "Helvetica-Bold" }]}>{item.colorName} TOTAL</Text>
+                <Text style={[S.td, S.cSku, { fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{item.supplierSku}</Text>
+                <Text style={[S.td, S.cH2u, { fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{item.h2uSku}</Text>
+                <Text style={[S.td, S.cColor, { fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{item.colorName} TOTAL</Text>
                 <Text style={[S.td, S.cMarking]}></Text>
                 {SIZES.map(s => {
                   const sizeTotal = plItems.reduce((sum: number, p: any) => sum + ((p as any)[`qty${s}`] ?? 0), 0);
-                  return <Text key={s} style={[S.td, S.cSize, { fontFamily: "Helvetica-Bold" }]}>{sizeTotal || ""}</Text>;
+                  return <Text key={s} style={[S.td, S.cSize, { fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{sizeTotal || ""}</Text>;
                 })}
-                <Text style={[S.td, S.cPairs, { fontFamily: "Helvetica-Bold", color: "#d03070" }]}>{itemTotal}</Text>
+                <Text style={[S.td, S.cPairs, { fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" }]}>{itemTotal}</Text>
                 <Text style={[S.td, S.cDate]}></Text>
                 <Text style={[S.td, S.cRemark]}></Text>
               </View>

@@ -18,8 +18,10 @@ export async function POST(req: NextRequest) {
   const bytes = await file.arrayBuffer();
   const buffer = Buffer.from(bytes);
 
-  const uploadDir = join(process.cwd(), "public", "uploads");
+  const uploadDir = join(process.cwd(), "public", "uploads", "products");
+  const { mkdir } = await import("fs/promises");
+  await mkdir(uploadDir, { recursive: true });
   await writeFile(join(uploadDir, filename), buffer);
 
-  return NextResponse.json({ url: `/uploads/${filename}` });
+  return NextResponse.json({ url: `/uploads/products/${filename}` });
 }

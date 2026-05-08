@@ -9,20 +9,15 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
-  const search   = searchParams.get("search") ?? "";
-  const category = searchParams.get("category") ?? "";
+  const sampleOrderId = searchParams.get("sampleOrderId");
 
   const items = await prisma.productLibrary.findMany({
-    where: {
-      ...(category ? { category } : {}),
-      ...(search ? { OR: [
-        { productName: { contains: search } },
-        { h2uSku: { contains: search } },
-        { supplierSku: { contains: search } },
-      ]} : {}),
+    where: sampleOrderId ? { sampleOrderId } : {},
+    include: {
+      manufacturer: { select: { id: true, name: true } },
+      sampleOrder: { select: { orderNumber: true } },
     },
-    include: { manufacturer: { select: { id: true, name: true } } },
-    orderBy: { createdAt: "desc" },
+    orderBy: { libNumber: "asc" },
   });
   return NextResponse.json(items);
 }
