@@ -18,6 +18,8 @@ type PLItem = {
   costRmb?: number; costRm?: number; sellingPrice?: number;
   imageUrls?: string; notes?: string; sampleOrderId?: string;
   shoePhotoUrl?: string; photoSideUrl?: string; photoUpperUrl?: string; photoDesignUrl?: string; boxPhotoUrl?: string;
+  materialUpperPhoto?: string; materialLiningPhoto?: string; materialMidsolePhoto?: string; materialOutsolePhoto?: string;
+  hardwarePhoto?: string; logoSpecPhoto?: string; heelSpecPhoto?: string; platformSpecPhoto?: string;
   manufacturer?: { id: string; name: string };
   sampleOrder?: { orderNumber: string };
   createdAt: string;
@@ -46,6 +48,8 @@ const BLANK_FORM = {
   hardware:"", logoSpec:"", heelSpec:"", platformSpec:"",
   costRmb:"", costRm:"", sellingPrice:"", notes:"",
   shoePhotoUrl:"", photoSideUrl:"", photoUpperUrl:"", photoDesignUrl:"", boxPhotoUrl:"", status:"",
+  materialUpperPhoto:"", materialLiningPhoto:"", materialMidsolePhoto:"", materialOutsolePhoto:"",
+  hardwarePhoto:"", logoSpecPhoto:"", heelSpecPhoto:"", platformSpecPhoto:"",
 };
 
 function parseSizes(s?: string): string[] {
@@ -95,7 +99,7 @@ export default function ProductLibraryPage() {
   const [creatingPO, setCreatingPO] = useState<string | null>(null);
 
   // Group-edit modal state
-  type GroupColour = { id: string; colorName: string; colorCode: string; shoePhotoUrl: string; photoSideUrl: string; photoUpperUrl: string; photoDesignUrl: string };
+  type GroupColour = { id: string; colorName: string; colorCode: string; shoePhotoUrl: string; photoSideUrl: string; photoUpperUrl: string; photoDesignUrl: string; isNew?: boolean };
   const [groupModal, setGroupModal]   = useState(false);
   const [groupItems, setGroupItems]   = useState<PLItem[]>([]);
   const [groupForm, setGroupForm]     = useState({ productName: "", mainSku: "", category: "", brand: "", season: "" });
@@ -133,38 +137,39 @@ export default function ProductLibraryPage() {
     try {
       await Promise.all(groupColours.map(async gc => {
         const derivedH2u = groupForm.mainSku && gc.colorCode ? groupForm.mainSku + gc.colorCode : null;
-        await fetch(`/api/product-library/${gc.id}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            productName: groupForm.productName,
-            mainSku: groupForm.mainSku || null,
-            category: groupForm.category || null,
-            brand: groupForm.brand || null,
-            season: groupForm.season || null,
-            colorName: gc.colorName || null,
-            colorCode: gc.colorCode || null,
-            h2uSku: derivedH2u,
-            shoePhotoUrl: gc.shoePhotoUrl || null,
-            photoSideUrl: gc.photoSideUrl || null,
-            photoUpperUrl: gc.photoUpperUrl || null,
-            photoDesignUrl: gc.photoDesignUrl || null,
-          }),
-        });
-        setAllItems(prev => prev.map(it => it.id === gc.id ? {
-          ...it,
+        const colourPayload = {
           productName: groupForm.productName,
-          mainSku: groupForm.mainSku || undefined,
-          category: groupForm.category || undefined,
-          brand: groupForm.brand || undefined,
-          season: groupForm.season || undefined,
-          colorName: gc.colorName || undefined,
-          colorCode: gc.colorCode || undefined,
-          h2uSku: derivedH2u ?? undefined,
-          shoePhotoUrl: gc.shoePhotoUrl || undefined,
-          photoSideUrl: gc.photoSideUrl || undefined,
-          photoUpperUrl: gc.photoUpperUrl || undefined,
-          photoDesignUrl: gc.photoDesignUrl || undefined,
-        } : it));
+          mainSku: groupForm.mainSku || null,
+          category: groupForm.category || null,
+          brand: groupForm.brand || null,
+          season: groupForm.season || null,
+          colorName: gc.colorName || null,
+          colorCode: gc.colorCode || null,
+          h2uSku: derivedH2u,
+          shoePhotoUrl: gc.shoePhotoUrl || null,
+          photoSideUrl: gc.photoSideUrl || null,
+          photoUpperUrl: gc.photoUpperUrl || null,
+          photoDesignUrl: gc.photoDesignUrl || null,
+        };
+        if (gc.isNew) {
+          const res = await fetch("/api/product-library", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...colourPayload, status: "active" }),
+          });
+          if (res.ok) {
+            const created = await res.json();
+            setAllItems(prev => [created, ...prev]);
+          }
+        } else {
+          const res = await fetch(`/api/product-library/${gc.id}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(colourPayload),
+          });
+          if (res.ok) {
+            const updated = await res.json();
+            setAllItems(prev => prev.map(it => it.id === gc.id ? { ...it, ...updated } : it));
+          }
+        }
       }));
     } finally {
       setSavingGroup(false);
@@ -174,14 +179,20 @@ export default function ProductLibraryPage() {
   async function handleGroupPhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !pendingGroupUpload) return;
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch("/api/upload", { method: "POST", body: fd });
-    if (res.ok) {
-      const { url } = await res.json();
-      const { idx, field } = pendingGroupUpload;
-      setGroupColours(prev => prev.map((c, i) => i === idx ? { ...c, [field]: url } : c));
+    const { idx, field } = pendingGroupUpload;
+    let url: string | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (res.ok) { url = (await res.json()).url; break; }
+      } catch {
+        if (attempt === 2) { alert("Upload failed — please try again."); break; }
+        await new Promise(r => setTimeout(r, 800));
+      }
     }
+    if (url) setGroupColours(prev => prev.map((c, i) => i === idx ? { ...c, [field]: url as string } : c));
     e.target.value = "";
     setPendingGroupUpload(null);
   }
@@ -317,6 +328,14 @@ export default function ProductLibraryPage() {
       photoUpperUrl: item.photoUpperUrl ?? "",
       photoDesignUrl: item.photoDesignUrl ?? "",
       boxPhotoUrl: item.boxPhotoUrl ?? "",
+      materialUpperPhoto: item.materialUpperPhoto ?? "",
+      materialLiningPhoto: item.materialLiningPhoto ?? "",
+      materialMidsolePhoto: item.materialMidsolePhoto ?? "",
+      materialOutsolePhoto: item.materialOutsolePhoto ?? "",
+      hardwarePhoto: item.hardwarePhoto ?? "",
+      logoSpecPhoto: item.logoSpecPhoto ?? "",
+      heelSpecPhoto: item.heelSpecPhoto ?? "",
+      platformSpecPhoto: item.platformSpecPhoto ?? "",
       status: item.status ?? "",
       ...overrides,
     };
@@ -335,15 +354,20 @@ export default function ProductLibraryPage() {
 
   async function uploadPhoto(file: File, field: string) {
     setUploadingPhoto(field);
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch("/api/upload", { method: "POST", body: fd });
-    if (res.ok) {
-      const { url } = await res.json();
-      setF(field, url);
-    } else {
-      alert("Upload failed");
+    let url: string | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (res.ok) { url = (await res.json()).url; break; }
+      } catch {
+        if (attempt === 2) { alert("Upload failed — please try again."); setUploadingPhoto(null); return; }
+        await new Promise(r => setTimeout(r, 800));
+      }
     }
+    if (url) setF(field, url);
+    else alert("Upload failed — please try again.");
     setUploadingPhoto(null);
   }
 
@@ -387,14 +411,30 @@ export default function ProductLibraryPage() {
       photoUpperUrl: (form as any).photoUpperUrl || null,
       photoDesignUrl: (form as any).photoDesignUrl || null,
       boxPhotoUrl: (form as any).boxPhotoUrl || null,
+      materialUpperPhoto: (form as any).materialUpperPhoto || null,
+      materialLiningPhoto: (form as any).materialLiningPhoto || null,
+      materialMidsolePhoto: (form as any).materialMidsolePhoto || null,
+      materialOutsolePhoto: (form as any).materialOutsolePhoto || null,
+      hardwarePhoto: (form as any).hardwarePhoto || null,
+      logoSpecPhoto: (form as any).logoSpecPhoto || null,
+      heelSpecPhoto: (form as any).heelSpecPhoto || null,
+      platformSpecPhoto: (form as any).platformSpecPhoto || null,
     };
     const payloadWithStatus = { ...payload, status: (form as any).status || null };
     if (editId) {
-      await fetch(`/api/product-library/${editId}`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payloadWithStatus) });
-      setAllItems(prev => prev.map(it => it.id === editId ? { ...it, ...(payloadWithStatus as Partial<PLItem>) } : it));
+      const res = await fetch(`/api/product-library/${editId}`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payloadWithStatus) });
+      if (res.ok) {
+        const updated = await res.json();
+        setAllItems(prev => prev.map(it => it.id === editId ? { ...it, ...updated } : it));
+      } else {
+        alert("Save failed. Please try again.");
+        setSaving(false);
+        return;
+      }
     } else {
       const res = await fetch("/api/product-library", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
       if (res.ok) { const d = await res.json(); setAllItems(prev => [d, ...prev]); }
+      else { alert("Save failed. Please try again."); setSaving(false); return; }
     }
     setSaving(false);
     setModal(false);
@@ -1050,7 +1090,7 @@ export default function ProductLibraryPage() {
                     ["photoDesignUrl", "Design"],
                   ];
                   return (
-                    <div key={gc.id} className="bg-gray-50 rounded-xl px-3 py-3 space-y-3">
+                    <div key={gc.id || `new-${i}`} className="bg-gray-50 rounded-xl px-3 py-3 space-y-3">
                       {/* Colour name + code row */}
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-400 w-5 shrink-0">{i + 1}.</span>
@@ -1064,6 +1104,13 @@ export default function ProductLibraryPage() {
                           <span className="font-mono text-xs text-brand-700 bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded shrink-0">
                             {preview}
                           </span>
+                        )}
+                        {gc.isNew && (
+                          <button
+                            onClick={() => setGroupColours(prev => prev.filter((_, j) => j !== i))}
+                            className="text-red-400 hover:text-red-600 ml-1 shrink-0"
+                            title="Remove this colour"
+                          ><X size={14} /></button>
                         )}
                       </div>
                       {/* Photo uploads per colour */}
@@ -1098,6 +1145,13 @@ export default function ProductLibraryPage() {
                   );
                 })}
               </div>
+              {/* Add new colour */}
+              <button
+                onClick={() => setGroupColours(prev => [...prev, { id: "", colorName: "", colorCode: "", shoePhotoUrl: "", photoSideUrl: "", photoUpperUrl: "", photoDesignUrl: "", isNew: true }])}
+                className="w-full mt-2 flex items-center justify-center gap-1.5 border-2 border-dashed border-gray-200 rounded-xl py-2.5 text-sm text-gray-400 hover:border-brand-400 hover:text-brand-600 transition-colors"
+              >
+                <Plus size={14} /> Add Colour
+              </button>
               <input ref={groupPhotoInputRef} type="file" accept="image/*" className="hidden" onChange={handleGroupPhotoChange} />
             </div>
 
@@ -1192,8 +1246,44 @@ export default function ProductLibraryPage() {
               <div>
                 <p className="text-sm font-medium text-gray-700 mb-2">Material Specs</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {[["materialUpper","Upper"],["materialLining","Lining"],["materialMidsole","Midsole"],["materialOutsole","Outsole"],["hardware","Hardware"],["heelSpec","Heel"],["platformSpec","Platform"],["logoSpec","Logo"]].map(([k,l])=>(
-                    <div key={k}><label className="label text-xs">{l}</label><input className="input text-sm" value={(form as any)[k]} onChange={e=>setF(k,e.target.value)}/></div>
+                  {([
+                    ["materialUpper","Upper","materialUpperPhoto"],
+                    ["materialLining","Lining","materialLiningPhoto"],
+                    ["materialMidsole","Midsole","materialMidsolePhoto"],
+                    ["materialOutsole","Outsole","materialOutsolePhoto"],
+                    ["hardware","Hardware","hardwarePhoto"],
+                    ["heelSpec","Heel","heelSpecPhoto"],
+                    ["platformSpec","Platform","platformSpecPhoto"],
+                    ["logoSpec","Logo","logoSpecPhoto"],
+                  ] as [string,string,string][]).map(([k,l,photoKey])=>(
+                    <div key={k}>
+                      <label className="label text-xs">{l}</label>
+                      <input className="input text-sm" value={(form as any)[k]} onChange={e=>setF(k,e.target.value)}/>
+                      <div className="mt-1 flex items-center gap-2">
+                        {(form as any)[photoKey] ? (
+                          <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-gray-200 shrink-0">
+                            <Image src={(form as any)[photoKey]} alt={l} fill className="object-cover"/>
+                            <button
+                              onClick={() => setF(photoKey, "")}
+                              className="absolute top-0 right-0 bg-black/50 text-white text-[8px] px-0.5 leading-tight"
+                            >✕</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => triggerPhotoUpload(photoKey)}
+                            className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-brand-600 border border-dashed border-gray-200 rounded-lg px-2 py-1 hover:border-brand-400 transition-colors"
+                          >
+                            {uploadingPhoto === photoKey ? "Uploading…" : <><Camera size={10}/> Add photo</>}
+                          </button>
+                        )}
+                        {(form as any)[photoKey] && (
+                          <button
+                            onClick={() => triggerPhotoUpload(photoKey)}
+                            className="text-[10px] text-gray-400 hover:text-brand-600"
+                          >Change</button>
+                        )}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -1213,7 +1303,6 @@ export default function ProductLibraryPage() {
                   {([
                     ["shoePhotoUrl", "Main"],
                     ["photoSideUrl", "Side"],
-                    ["photoUpperUrl", "Upper"],
                     ["photoDesignUrl", "Design View"],
                   ] as [string, string][]).map(([field, label]) => (
                     <div key={field} className="flex flex-col items-center gap-1">

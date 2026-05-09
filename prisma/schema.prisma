@@ -600,6 +600,16 @@ model ProductLibrary {
   heelSpec        String?
   platformSpec    String?
 
+  // Material spec photos
+  materialUpperPhoto   String?
+  materialLiningPhoto  String?
+  materialMidsolePhoto String?
+  materialOutsolePhoto String?
+  hardwarePhoto        String?
+  logoSpecPhoto        String?
+  heelSpecPhoto        String?
+  platformSpecPhoto    String?
+
   // Cost & pricing (cost from sample received, selling price from PO)
   costRmb         Float?
   costRm          Float?
