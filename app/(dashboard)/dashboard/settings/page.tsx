@@ -1,7 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Save, Plus, Trash2, Edit2, X } from "lucide-react";
+import { Save, Plus, Trash2, Edit2, X, Upload, Trash } from "lucide-react";
+
+const VENDORS = ["Belle", "BlissFit", "Bunny", "Fashion Bag", "Happy2U", "La Dolce Vita", "Latex", "Mary Jane"] as const;
+type VendorAsset = { id: string; vendor: string; assetType: string; imageUrl: string };
 
 type Outlet = { id: string; name: string; marking: string; country: string; address?: string; isHQ: boolean };
 type User   = { id: string; name?: string; email: string; role: string; outletId?: string };
@@ -18,6 +21,10 @@ export default function SettingsPage() {
   const [newRate, setNewRate] = useState("0.62");
   const [saving, setSaving]   = useState(false);
 
+  const [vendorAssets, setVendorAssets] = useState<VendorAsset[]>([]);
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const [removingKey, setRemovingKey]   = useState<string | null>(null);
+
   const [outletModal, setOutletModal] = useState(false);
   const [outletForm, setOutletForm]   = useState({ name:"", marking:"", country:"MY", address:"", isHQ:false });
   const [editOutlet, setEditOutlet]   = useState<Outlet | null>(null);
@@ -27,11 +34,61 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetch("/api/outlets").then(r=>r.json()).then(setOutlets).catch(()=>{});
+    fetch("/api/vendor-assets").then(r=>r.json()).then(setVendorAssets).catch(()=>{});
     if (isAdmin) {
       fetch("/api/users").then(r=>r.json()).then(setUsers).catch(()=>{});
       fetch("/api/exchange-rate").then(r=>r.json()).then((d)=>{ setRate(d); setNewRate(String(d.rate)); }).catch(()=>{});
     }
   }, [isAdmin]);
+
+  function getAsset(vendor: string, assetType: string) {
+    return vendorAssets.find(a => a.vendor === vendor && a.assetType === assetType) ?? null;
+  }
+
+  async function handleVendorUpload(e: React.ChangeEvent<HTMLInputElement>, vendor: string, assetType: string) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const key = `${vendor}|${assetType}`;
+    setUploadingKey(key);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const upRes = await fetch("/api/upload/vendor", { method: "POST", body: fd });
+      if (!upRes.ok) { console.error("Upload failed", await upRes.text()); return; }
+      const { url } = await upRes.json();
+      const res = await fetch("/api/vendor-assets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vendor, assetType, imageUrl: url }),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setVendorAssets(prev => [...prev.filter(a => !(a.vendor === vendor && a.assetType === assetType)), saved]);
+      } else {
+        console.error("Save asset failed", await res.text());
+      }
+    } catch (err) {
+      console.error("handleVendorUpload error:", err);
+    } finally {
+      setUploadingKey(null);
+      e.target.value = "";
+    }
+  }
+
+  async function handleVendorRemove(vendor: string, assetType: string) {
+    const key = `${vendor}|${assetType}`;
+    setRemovingKey(key);
+    try {
+      await fetch("/api/vendor-assets", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vendor, assetType }),
+      });
+      setVendorAssets(prev => prev.filter(a => !(a.vendor === vendor && a.assetType === assetType)));
+    } finally {
+      setRemovingKey(null);
+    }
+  }
 
   async function saveRate() {
     setSaving(true);
@@ -262,6 +319,30 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* Shoe Box Design */}
+      <VendorAssetSection
+        title="Shoe Box Design"
+        description="Upload the shoe box artwork for each vendor. Used in production orders and QC references."
+        assetType="box"
+        getAsset={getAsset}
+        uploadingKey={uploadingKey}
+        removingKey={removingKey}
+        onUpload={handleVendorUpload}
+        onRemove={handleVendorRemove}
+      />
+
+      {/* Logo Design */}
+      <VendorAssetSection
+        title="Logo Design"
+        description="Upload the logo for each vendor brand. Used on purchase orders and packing materials."
+        assetType="logo"
+        getAsset={getAsset}
+        uploadingKey={uploadingKey}
+        removingKey={removingKey}
+        onUpload={handleVendorUpload}
+        onRemove={handleVendorRemove}
+      />
+
       {/* User Modal */}
       {userModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -296,6 +377,79 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function VendorAssetSection({
+  title, description, assetType, getAsset, uploadingKey, removingKey, onUpload, onRemove,
+}: {
+  title: string;
+  description: string;
+  assetType: string;
+  getAsset: (vendor: string, assetType: string) => VendorAsset | null;
+  uploadingKey: string | null;
+  removingKey: string | null;
+  onUpload: (e: React.ChangeEvent<HTMLInputElement>, vendor: string, assetType: string) => void;
+  onRemove: (vendor: string, assetType: string) => void;
+}) {
+  function openPicker(vendor: string) {
+    if (uploadingKey) return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = (e) => onUpload(e as unknown as React.ChangeEvent<HTMLInputElement>, vendor, assetType);
+    input.click();
+  }
+
+  return (
+    <div className="card p-6">
+      <div className="mb-5">
+        <h2 className="font-semibold text-gray-900">{title}</h2>
+        <p className="text-xs text-gray-400 mt-0.5">{description}</p>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+        {VENDORS.map(vendor => {
+          const asset    = getAsset(vendor, assetType);
+          const busy     = uploadingKey === `${vendor}|${assetType}`;
+          const removing = removingKey  === `${vendor}|${assetType}`;
+          return (
+            <div key={vendor} className="flex flex-col items-center gap-2">
+              <div className="relative w-full group">
+                <div
+                  onClick={() => !busy && !removing && openPicker(vendor)}
+                  className={`w-full aspect-square rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 transition-colors flex items-center justify-center overflow-hidden ${busy || removing ? "cursor-wait opacity-60" : "cursor-pointer hover:border-blue-400 hover:bg-blue-50"}`}
+                >
+                  {busy ? (
+                    <span className="text-xs text-gray-400">Uploading…</span>
+                  ) : removing ? (
+                    <span className="text-xs text-gray-400">Removing…</span>
+                  ) : asset ? (
+                    <img src={asset.imageUrl} alt={vendor} className="w-full h-full object-contain p-2" />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1 text-gray-300 group-hover:text-blue-400 transition-colors">
+                      <Upload size={22} />
+                      <span className="text-xs">Upload</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Remove button — only when image exists and not busy */}
+                {asset && !busy && !removing && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onRemove(vendor, assetType); }}
+                    title="Remove image"
+                    className="absolute top-1.5 right-1.5 bg-white border border-gray-200 rounded-full p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:border-red-300 hover:text-red-600 text-gray-400"
+                  >
+                    <Trash size={12} />
+                  </button>
+                )}
+              </div>
+              <span className="text-xs font-medium text-gray-700 text-center leading-tight">{vendor}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

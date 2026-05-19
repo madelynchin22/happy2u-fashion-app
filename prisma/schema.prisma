@@ -43,6 +43,7 @@ model Outlet {
   shipments         Shipment[]
   deliveries        Delivery[]
   outletDeliveries  OutletDelivery[]
+  locationInventories LocationInventory[]
 }
 
 // ─── EXCHANGE RATE ───────────────────────────────────────────────────────────
@@ -330,6 +331,9 @@ model PurchaseOrderItem {
 
   outletAllocations String?  // JSON: [{outletId, qty36-42}] per-outlet size breakdown
 
+  // Actual ship-out date from manufacturer (per item, independent of PO-level shipDate)
+  itemShipDate    DateTime?
+
   // Goods receipt
   receivedQty     Int?
   defectQty       Int?
@@ -362,7 +366,7 @@ model PackingListItem {
   poItem          PurchaseOrderItem @relation(fields: [poItemId], references: [id])
 
   outletId        String
-  outlet          Outlet  @relation(fields: [outletId], references: [id])
+  outlet          Outlet  @relation(fields: [outletId], references: [id], onDelete: Cascade)
 
   // Size breakdown for this outlet
   qty36           Int     @default(0)
@@ -434,7 +438,7 @@ model Delivery {
   shipmentId  String
   shipment    Shipment @relation(fields: [shipmentId], references: [id])
   outletId    String
-  outlet      Outlet  @relation(fields: [outletId], references: [id])
+  outlet      Outlet  @relation(fields: [outletId], references: [id], onDelete: Cascade)
   receivedAt  DateTime?
   status      String  @default("pending") // pending | partial | complete | disputed
   notes       String?
@@ -581,7 +585,7 @@ model ProductLibrary {
   season          String?
 
   // Inventory & status (synced from Shopify export)
-  status          String?  // draft | active | low_stock | out_of_stock | clearance
+  status          String?  // draft | active | low_stock | out_of_stock | clearance | archived
   inventoryTotal  Int?     // total qty across all sizes & locations
   warehouseQty    Int?     // H2U Warehouse (Melaka) qty
   sizeRange       String?  // e.g. "36–41"
@@ -629,6 +633,7 @@ model ProductLibrary {
   boxPhotoUrl     String?   // shoe box / packaging photo
   imageUrls       String?   // legacy JSON array
 
+  description     String?   // product description synced from Shopify
   notes           String?
 
   // Source tracking
@@ -639,6 +644,34 @@ model ProductLibrary {
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  locationInventories LocationInventory[]
+}
+
+// ─── LOCATION INVENTORY ───────────────────────────────────────────────────────
+
+model LocationInventory {
+  id                String         @id @default(cuid())
+  productLibraryId  String
+  productLibrary    ProductLibrary @relation(fields: [productLibraryId], references: [id], onDelete: Cascade)
+  outletId          String
+  outlet            Outlet         @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  qty35             Int            @default(0)
+  qty36             Int            @default(0)
+  qty37             Int            @default(0)
+  qty38             Int            @default(0)
+  qty39             Int            @default(0)
+  qty40             Int            @default(0)
+  qty41             Int            @default(0)
+  qty42             Int            @default(0)
+  totalQty          Int            @default(0)
+
+  notes             String?
+  uploadedAt        DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@unique([productLibraryId, outletId])
 }
 
 // ─── PER-OUTLET DELIVERY TRACKING ────────────────────────────────────────────
@@ -675,4 +708,16 @@ model OutletReceiptItem {
   defectQty    Int?
   notes        String?
   receiptDate  DateTime?
+}
+
+// ─── VENDOR ASSETS ───────────────────────────────────────────────────────────
+model VendorAsset {
+  id        String   @id @default(cuid())
+  vendor    String
+  assetType String   // "box" | "logo"
+  imageUrl  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([vendor, assetType])
 }

@@ -11,10 +11,15 @@ import React from "react";
 async function toDataUri(url: string | null | undefined): Promise<string | null> {
   if (!url) return null;
   try {
-    const absPath = url.startsWith("/uploads/")
-      ? join(process.cwd(), "public", url)
-      : url;
-    const jpegBuf = await sharp(absPath).jpeg({ quality: 85 }).toBuffer();
+    let input: string | Buffer;
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      input = Buffer.from(await res.arrayBuffer());
+    } else {
+      input = url.startsWith("/uploads/") ? join(process.cwd(), "public", url) : url;
+    }
+    const jpegBuf = await sharp(input).jpeg({ quality: 85 }).toBuffer();
     return `data:image/jpeg;base64,${jpegBuf.toString("base64")}`;
   } catch {
     return null;
@@ -84,6 +89,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Fallback: h2uSku → photo from ProductLibrary (for POs without sampleOrderId)
+  const allH2uSkus = pos.flatMap(p => (p.items ?? []).map((i: any) => i.h2uSku).filter(Boolean));
+  const libByH2u = allH2uSkus.length
+    ? await prisma.productLibrary.findMany({
+        where: { h2uSku: { in: allH2uSkus } },
+        select: { h2uSku: true, shoePhotoUrl: true },
+      })
+    : [];
+  const h2uPhotoMap = new Map(libByH2u.map(l => [l.h2uSku, l.shoePhotoUrl]));
+
   const posEnriched = await Promise.all(pos.map(async p => {
     const sr = p.sampleOrderId ? sampleMap.get(p.sampleOrderId) : null;
     const mainRaw  = sr?.photoSideUrl ?? sr?.photoFrontUrl ?? null;
@@ -95,7 +110,10 @@ export async function GET(req: NextRequest) {
       items: await Promise.all((p.items ?? []).map(async (item: any) => {
         const colorKey  = item.colorName?.toLowerCase() ?? "";
         const colourRaw = colorKey ? colorMap?.get(colorKey) ?? null : null;
-        const itemUri   = await toDataUri(colourRaw);
+        const h2uRaw    = colourRaw
+          ?? (item.h2uSku ? h2uPhotoMap.get(item.h2uSku) ?? null : null)
+          ?? item.photoUrl ?? null;
+        const itemUri   = await toDataUri(h2uRaw);
         const skuMap    = p.sampleOrderId ? mainSkuMap.get(p.sampleOrderId)   : null;
         const codeMap   = p.sampleOrderId ? colorCodeMap.get(p.sampleOrderId) : null;
         const mainSku   = (colorKey ? skuMap?.get(colorKey)  : null) ?? item.mainSku   ?? null;
@@ -117,7 +135,7 @@ export async function GET(req: NextRequest) {
   }));
 
   const buffer = await renderToBuffer(
-    React.createElement(GroupPackingListPDF, { pos: posEnriched, groupCode, supplier }) as any
+    React.createElement(GroupPackingListPDF, { pos: posEnriched, groupCode, supplier, allOutlets }) as any
   );
 
   return new NextResponse(buffer as unknown as BodyInit, {

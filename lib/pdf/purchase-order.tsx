@@ -10,156 +10,327 @@ Font.register({
   ],
 });
 
+// A3 landscape: ~1150pt usable after padding
+const SIZES     = ["36","37","38","39","40","41","42"];
+const PHOTO_W   = 90;
+const EMPTY_ROWS = 8;
+
+const D = {
+  price:  32,
+  sku:    60,
+  main:   52,
+  h2u:    60,
+  color:  58,
+  code:   22,
+  mat:    42,  // ×5 = 210
+  logo:   58,
+  del:    52,
+  sz:     20,  // ×7 = 140
+  pairs:  28,
+  total:  42,
+  // remark: flex 1
+};
+
+const SZ_SPAN_W = D.sz * 7;
+
 const S = StyleSheet.create({
-  page:       { fontFamily: "NotoSansSC", fontSize: 8, padding: "20 24", color: "#1a1a1a" },
-  header:     { flexDirection: "row", justifyContent: "space-between", marginBottom: 10, borderBottom: "2pt solid #d03070", paddingBottom: 8 },
-  logoText:   { fontSize: 20, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" },
-  docTitle:   { fontSize: 12, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#374151", marginTop: 2 },
-  metaBox:    { alignItems: "flex-end" },
-  metaRow:    { flexDirection: "row", gap: 4, marginBottom: 2 },
-  metaLabel:  { color: "#888", width: 70, textAlign: "right" },
-  metaValue:  { fontFamily: "NotoSansSC", fontWeight: "bold", color: "#1a1a1a" },
-  totalsBox:  { backgroundColor: "#fdf4f7", border: "1pt solid #f6aac8", borderRadius: 3, padding: "5 10", alignItems: "flex-end", marginTop: 4 },
-  totalsLabel: { color: "#888", fontSize: 7 },
-  totalsValue: { fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 11, color: "#d03070" },
-  // Main table
-  table:      { marginTop: 8 },
-  thead:      { flexDirection: "row", backgroundColor: "#1a1a1a", color: "white" },
-  th:         { padding: "4 3", fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, color: "white", borderRight: "0.5pt solid #555" },
-  tbody:      { },
-  tr:         { flexDirection: "row", borderBottom: "0.5pt solid #e5e7eb" },
-  trAlt:      { backgroundColor: "#fdf4f7" },
-  td:         { padding: "4 3", fontSize: 8, borderRight: "0.5pt solid #e5e7eb" },
-  // Column widths
-  colPhoto:   { width: 35 },
-  colSku:     { width: 38 },
-  colBrand:   { width: 36 },
-  colMain:    { width: 36 },
-  colH2u:     { width: 42 },
-  colColor:   { width: 36 },
-  colCode:    { width: 18 },
-  colMat:     { width: 45 },
-  colSize:    { width: 18, textAlign: "center" },
-  colPairs:   { width: 22, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" },
-  colPrice:   { width: 32, textAlign: "right" },
-  colTotal:   { width: 35, textAlign: "right", fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" },
-  photoImg:   { width: 30, height: 30, objectFit: "contain" },
-  footer:     { position: "absolute", bottom: 14, left: 24, right: 24, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: "#aaa", borderTop: "0.5pt solid #e5e7eb", paddingTop: 4 },
+  page:       { fontFamily: "NotoSansSC", fontSize: 7, padding: "16 20 20 20", backgroundColor: "white" },
+
+  // ── Page header ──
+  pageHeader: { flexDirection: "row", alignItems: "flex-start", marginBottom: 4 },
+  titleArea:  { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 10 },
+  titleText:  { fontSize: 13, fontFamily: "NotoSansSC", fontWeight: "bold", letterSpacing: 2, color: "#1a1a1a" },
+
+  // PO info box (top-right)
+  metaOuter:   { flexDirection: "row", alignItems: "flex-start" },
+  metaBox:     { border: "0.75pt solid #555" },
+  metaRow:     { flexDirection: "row", borderBottom: "0.5pt solid #555" },
+  metaRowLast: { flexDirection: "row" },
+  metaLabel:   { width: 72, padding: "2 4", borderRight: "0.5pt solid #555", fontSize: 6.5, color: "#333" },
+  metaVal:     { width: 54, padding: "2 4", fontSize: 7, fontFamily: "NotoSansSC", fontWeight: "bold", textAlign: "right" },
+  metaYellow:  { backgroundColor: "#FFF3B0" },
+  metaRed:     { backgroundColor: "#FFD3DC" },
+
+  // Total/Paid/Pending
+  pendingBox: { marginLeft: 8, paddingTop: 2 },
+  pRow:       { flexDirection: "row", marginBottom: 1 },
+  pLabel:     { width: 42, fontSize: 7, color: "#555" },
+  pValue:     { width: 60, fontSize: 7, fontFamily: "NotoSansSC", fontWeight: "bold", textAlign: "right" },
+  pLine:      { height: 0.5, backgroundColor: "#aaa", marginVertical: 2, width: 102 },
+
+  // ── Main table ──
+  table:      { border: "0.75pt solid #555", marginTop: 4 },
+
+  hRow1:      { flexDirection: "row", backgroundColor: "#f2f2f2", borderBottom: "0.5pt solid #aaa" },
+  hRow2:      { flexDirection: "row", backgroundColor: "#e8e8e8", borderBottom: "0.5pt solid #aaa" },
+  th:         { padding: "2 1.5", fontSize: 6, fontFamily: "NotoSansSC", fontWeight: "bold", borderRight: "0.5pt solid #bbb", color: "#222", textAlign: "center" },
+  thPhotoBox: { width: PHOTO_W, borderRight: "0.5pt solid #bbb" },
+
+  // Product block (photo spans all rows via flex-row layout)
+  block:    { flexDirection: "row", borderBottom: "0.75pt solid #888" },
+  photoCol: { width: PHOTO_W, borderRight: "0.75pt solid #888", padding: "5 4", alignItems: "center" },
+  photoImg: { width: 76, height: 68, objectFit: "contain" },
+  photoSup: { fontSize: 6.5, color: "#444", marginTop: 3, textAlign: "center" },
+  photoRed: { fontSize: 6.5, color: "#d03070", marginTop: 1, textAlign: "center" },
+  dataSec:  { flex: 1 },
+
+  tr:    { flexDirection: "row", borderBottom: "0.5pt solid #ddd" },
+  td:    { padding: "2 1.5", fontSize: 7, borderRight: "0.5pt solid #ddd" },
+  tdR:   { padding: "2 1.5", fontSize: 7 },
+
+  eRow:  { flexDirection: "row", height: 12, borderBottom: "0.5pt solid #ddd" },
+  eCell: { borderRight: "0.5pt solid #ddd" },
+
+  footer: { position: "absolute", bottom: 12, left: 20, right: 20, flexDirection: "row", justifyContent: "space-between", fontSize: 6.5, color: "#aaa", borderTop: "0.5pt solid #e5e7eb", paddingTop: 3 },
 });
 
-const SIZES = ["36","37","38","39","40","41","42"];
-
 export function PurchaseOrderPDF({ po }: { po: any }) {
+  const items: any[] = po.items ?? [];
+  const currency = po.currency === "RMB" ? "¥" : "RM";
+  const supplierName = po.manufacturer?.name ?? "";
+
+  // Group items by supplierSku — same model = same photo block
+  const groups: { supplierSku: string; items: any[] }[] = [];
+  for (const item of items) {
+    const key = item.supplierSku || item.h2uSku || "";
+    const last = groups[groups.length - 1];
+    if (last && last.supplierSku === key) {
+      last.items.push(item);
+    } else {
+      groups.push({ supplierSku: key, items: [item] });
+    }
+  }
+
+  const totalPairs = items.reduce((s, i) => s + (i.totalPairs ?? 0), 0);
+  const totalPrice = items.reduce((s, i) => s + (i.lineTotal ?? 0), 0);
+  const dateLabel  = new Date(po.date ?? po.createdAt).toLocaleDateString("en-US",
+    { month: "numeric", day: "numeric", year: "numeric" });
+
   return (
     <Document>
       <Page size="A3" orientation="landscape" style={S.page}>
-        {/* Header */}
-        <View style={S.header}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            {po.photoUrl && (
-              <Image src={po.photoUrl} style={{ width: 60, height: 60, objectFit: "contain", borderRadius: 4, border: "1pt solid #e5e7eb" }} />
-            )}
-            <View>
-              <Text style={S.logoText}>Happy2U</Text>
-              <Text style={S.docTitle}>PURCHASE ORDER</Text>
-              {po.libProductName && (
-                <Text style={{ fontSize: 8, color: "#888", marginTop: 2 }}>{po.libProductName}</Text>
-              )}
-            </View>
+
+        {/* ── Page header ── */}
+        <View style={S.pageHeader}>
+          <View style={S.titleArea}>
+            <Text style={S.titleText}>PURCHASE ORDER</Text>
           </View>
-          <View style={S.metaBox}>
-            <View style={S.metaRow}>
-              <Text style={S.metaLabel}>PO No:</Text>
-              <Text style={[S.metaValue, { color: "#d03070" }]}>{po.poNumber}</Text>
-            </View>
-            <View style={S.metaRow}>
-              <Text style={S.metaLabel}>Date:</Text>
-              <Text style={S.metaValue}>{new Date(po.date ?? po.createdAt).toLocaleDateString("en-MY", { day:"2-digit", month:"2-digit", year:"numeric" })}</Text>
-            </View>
-            <View style={S.metaRow}>
-              <Text style={S.metaLabel}>Supplier:</Text>
-              <Text style={S.metaValue}>{po.manufacturer?.name}</Text>
-            </View>
-            {po.deliveryDate && (
+
+          <View style={S.metaOuter}>
+            {/* PO info box */}
+            <View style={S.metaBox}>
               <View style={S.metaRow}>
-                <Text style={S.metaLabel}>Delivery:</Text>
-                <Text style={S.metaValue}>{new Date(po.deliveryDate).toLocaleDateString("en-MY")}</Text>
+                <Text style={S.metaLabel}>PO NO:</Text>
+                <Text style={[S.metaVal, S.metaYellow]}>{po.poNumber}</Text>
               </View>
-            )}
-            <View style={S.totalsBox}>
-              <Text style={S.totalsLabel}>TOTAL PAIRS</Text>
-              <Text style={S.totalsValue}>{po.totalPairs}</Text>
-              <Text style={[S.totalsLabel, { marginTop: 4 }]}>TOTAL PRICE</Text>
-              <Text style={S.totalsValue}>¥ {po.totalPrice?.toFixed(2)}</Text>
+              <View style={S.metaRow}>
+                <Text style={S.metaLabel}>DATE:</Text>
+                <Text style={S.metaVal}>{dateLabel}</Text>
+              </View>
+              <View style={S.metaRow}>
+                <Text style={S.metaLabel}>TOTAL PAIRS:</Text>
+                <Text style={S.metaVal}>{totalPairs}</Text>
+              </View>
+              <View style={S.metaRowLast}>
+                <Text style={S.metaLabel}>TOTAL PRICE:</Text>
+                <Text style={[S.metaVal, S.metaRed]}>{currency}{totalPrice.toFixed(0)}</Text>
+              </View>
+            </View>
+
+            {/* Total / Paid / Pending */}
+            <View style={S.pendingBox}>
+              <View style={S.pRow}>
+                <Text style={S.pLabel}>Total</Text>
+                <Text style={S.pValue}>{currency} {totalPrice.toFixed(2)}</Text>
+              </View>
+              <View style={S.pLine} />
+              <View style={S.pRow}>
+                <Text style={S.pLabel}>Paid</Text>
+                <Text style={S.pValue}>{po.paymentPaidDate ? `${currency} ${totalPrice.toFixed(2)}` : ""}</Text>
+              </View>
+              <View style={S.pLine} />
+              <View style={S.pRow}>
+                <Text style={S.pLabel}>Pending</Text>
+                <Text style={S.pValue}>{!po.paymentPaidDate ? `${currency} ${totalPrice.toFixed(2)}` : ""}</Text>
+              </View>
             </View>
           </View>
         </View>
 
-        {/* Table */}
+        {/* ── Main table ── */}
         <View style={S.table}>
-          <View style={S.thead}>
-            <Text style={[S.th, S.colPhoto]}>Photo</Text>
-            <Text style={[S.th, S.colSku]}>Supplier SKU</Text>
-            <Text style={[S.th, S.colBrand]}>Brand</Text>
-            <Text style={[S.th, S.colMain]}>Main SKU</Text>
-            <Text style={[S.th, S.colH2u]}>H2U SKU</Text>
-            <Text style={[S.th, S.colColor]}>Color</Text>
-            <Text style={[S.th, S.colCode]}>Code</Text>
-            <Text style={[S.th, S.colMat]}>材料 Upper</Text>
-            <Text style={[S.th, S.colMat]}>内里 Lining</Text>
-            <Text style={[S.th, S.colMat]}>中底 Midsole</Text>
-            <Text style={[S.th, S.colMat]}>大底 Outsole</Text>
-            <Text style={[S.th, S.colMat]}>五金 Hardware</Text>
-            <Text style={[S.th, { width: 50 }]}>Remark / Logo</Text>
-            {SIZES.map(s => <Text key={s} style={[S.th, S.colSize]}>{s}</Text>)}
-            <Text style={[S.th, S.colPairs]}>Pairs</Text>
-            <Text style={[S.th, S.colPrice]}>Price</Text>
-            <Text style={[S.th, S.colTotal]}>Total</Text>
+
+          {/* Header row 1: column labels (bilingual) */}
+          <View style={S.hRow1}>
+            <View style={[S.thPhotoBox, { justifyContent: "center", alignItems: "center" }]}>
+              <Text style={{ fontSize: 7, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#333", textAlign: "center" }}>
+                {supplierName}
+              </Text>
+            </View>
+            <Text style={[S.th, { width: D.price }]}>$</Text>
+            <Text style={[S.th, { width: D.sku }]}>{"供应商款号\nSupplier SKU"}</Text>
+            <Text style={[S.th, { width: D.main }]}>{"主款号\nMain SKU"}</Text>
+            <Text style={[S.th, { width: D.h2u }]}>{"H2U款号\nH2U SKU"}</Text>
+            <Text style={[S.th, { width: D.color }]}>{"颜色\nColour"}</Text>
+            <Text style={[S.th, { width: D.code }]}>{"色号\nCode"}</Text>
+            <Text style={[S.th, { width: D.mat }]}>{"材料\nMaterial"}</Text>
+            <Text style={[S.th, { width: D.mat }]}>{"内里\nInsole"}</Text>
+            <Text style={[S.th, { width: D.mat }]}>{"中底\nMidsole"}</Text>
+            <Text style={[S.th, { width: D.mat }]}>{"大底\nOutsole"}</Text>
+            <Text style={[S.th, { width: D.mat }]}>{"五金\nMetal Buckle"}</Text>
+            <Text style={[S.th, { flex: 1 }]}>{"备注\nRemarks"}</Text>
+            <Text style={[S.th, { width: D.logo }]}>LOGO</Text>
+            <Text style={[S.th, { width: D.del }]}>{"交货日期\nDelivery Date"}</Text>
+            <Text style={[S.th, { width: SZ_SPAN_W }]}>尺码/SIZE</Text>
+            <Text style={[S.th, { width: D.pairs }]}>{"双数\nPairs"}</Text>
+            <Text style={[S.th, { width: D.total, borderRight: 0 }]}>{"总价\nTotal"}</Text>
           </View>
 
-          <View style={S.tbody}>
-            {po.items?.map((item: any, i: number) => (
-              <View key={item.id} style={[S.tr, i % 2 === 1 ? S.trAlt : {}]}>
-                <View style={[S.td, S.colPhoto]}>
-                  {item.photoUrl ? <Image src={item.photoUrl} style={S.photoImg} /> : <View style={[S.photoImg, { backgroundColor: "#f3f4f6" }]} />}
-                </View>
-                <Text style={[S.td, S.colSku]}>{item.supplierSku || ""}</Text>
-                <Text style={[S.td, S.colBrand]}>{item.brand || po.brand}</Text>
-                <Text style={[S.td, S.colMain]}>{item.mainSku || ""}</Text>
-                <Text style={[S.td, S.colH2u]}>
-                  {item.mainSku && item.colorCode
-                    ? `${item.mainSku}${item.colorCode}`
-                    : item.h2uSku || ""}
-                </Text>
-                <Text style={[S.td, S.colColor]}>{item.colorName || ""}</Text>
-                <Text style={[S.td, S.colCode]}>{item.colorCode || ""}</Text>
-                <Text style={[S.td, S.colMat]}>{item.materialUpper || ""}</Text>
-                <Text style={[S.td, S.colMat]}>{item.materialLining || ""}</Text>
-                <Text style={[S.td, S.colMat]}>{item.materialMidsole || ""}</Text>
-                <Text style={[S.td, S.colMat]}>{item.materialOutsole || ""}</Text>
-                <Text style={[S.td, S.colMat]}>{item.hardware || ""}</Text>
-                <Text style={[S.td, { width: 50 }]}>{[item.remark, item.logoSpec].filter(Boolean).join(" · ")}</Text>
-                {SIZES.map(s => (
-                  <Text key={s} style={[S.td, S.colSize]}>{(item as any)[`qty${s}`] || ""}</Text>
-                ))}
-                <Text style={[S.td, S.colPairs]}>{item.totalPairs}</Text>
-                <Text style={[S.td, S.colPrice]}>{item.discountPrice ? `¥${item.discountPrice}` : ""}</Text>
-                <Text style={[S.td, S.colTotal]}>{item.lineTotal ? `¥${item.lineTotal.toFixed(0)}` : ""}</Text>
-              </View>
-            ))}
+          {/* Header row 2: individual size numbers */}
+          <View style={S.hRow2}>
+            <View style={S.thPhotoBox} />
+            <View style={{ width: D.price,  borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.sku,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.main,   borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.h2u,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.color,  borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.code,   borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ flex: 1,         borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.logo,   borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.del,    borderRight: "0.5pt solid #bbb" }} />
+            {SIZES.map(s => <Text key={s} style={[S.th, { width: D.sz }]}>{s}</Text>)}
+            <View style={{ width: D.pairs,  borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.total }} />
           </View>
+
+          {/* ── Product blocks (photo spans all colour rows) ── */}
+          {groups.map((grp, gIdx) => {
+            const photo         = grp.items[0]?.photoUrl ?? po.photoUrl ?? null;
+            const deliveryDate  = grp.items[0]?.deliveryDate;
+            const deliveryLabel = deliveryDate
+              ? new Date(deliveryDate).toLocaleDateString("en-MY", { month: "short", year: "2-digit" }).toUpperCase()
+              : "";
+
+            return (
+              <View key={gIdx} style={S.block} wrap={false}>
+
+                {/* Photo column — spans all colour rows automatically */}
+                <View style={S.photoCol}>
+                  {photo
+                    ? <Image src={photo} style={S.photoImg} />
+                    : <View style={[S.photoImg, { backgroundColor: "#f3f4f6" }]} />}
+                  <Text style={S.photoSup}>{grp.supplierSku}</Text>
+                  {deliveryLabel ? <Text style={S.photoRed}>{deliveryLabel}</Text> : null}
+                </View>
+
+                {/* Data section */}
+                <View style={S.dataSec}>
+
+                  {/* Colour variant rows */}
+                  {grp.items.map((item: any, i: number) => (
+                    <View key={item.id} style={S.tr}>
+                      <Text style={[S.td, { width: D.price, textAlign: "right" }]}>
+                        {item.discountPrice ? `¥${item.discountPrice}` : ""}
+                      </Text>
+                      <Text style={[S.td, { width: D.sku }]}>
+                        {i === 0 ? (item.supplierSku || "") : ""}
+                      </Text>
+                      <Text style={[S.td, { width: D.main, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
+                        {item.mainSku || ""}
+                      </Text>
+                      <Text style={[S.td, { width: D.h2u, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
+                        {item.mainSku && item.colorCode
+                          ? `${item.mainSku}${item.colorCode}`
+                          : item.h2uSku || ""}
+                      </Text>
+                      <Text style={[S.td, { width: D.color }]}>{item.colorName || ""}</Text>
+                      <Text style={[S.td, { width: D.code }]}>{item.colorCode || ""}</Text>
+                      <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialUpper   || "") : ""}</Text>
+                      <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialLining  || "") : ""}</Text>
+                      <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialMidsole || "") : ""}</Text>
+                      <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialOutsole || "") : ""}</Text>
+                      <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.hardware        || "") : ""}</Text>
+
+                      {/* REMARK: text + shoe box design image (first row only) */}
+                      <View style={[S.td, { flex: 1, flexDirection: "column" }]}>
+                        {i === 0 && item.remark ? <Text>{item.remark}</Text> : null}
+                        {i === 0 && item.boxDesignUri ? (
+                          <Image src={item.boxDesignUri} style={{ width: "100%", height: 64, objectFit: "contain", marginTop: 2 }} />
+                        ) : null}
+                      </View>
+
+                      {/* LOGO: logo design image + spec text (first row only) */}
+                      <View style={[S.td, { width: D.logo, flexDirection: "column", alignItems: "center" }]}>
+                        {i === 0 && item.logoDesignUri ? (
+                          <Image src={item.logoDesignUri} style={{ width: D.logo - 4, height: 52, objectFit: "contain" }} />
+                        ) : null}
+                        {i === 0 && item.logoSpec ? <Text style={{ marginTop: 1 }}>{item.logoSpec}</Text> : null}
+                      </View>
+
+                      <Text style={[S.td, { width: D.del }]}>
+                        {i === 0 && item.deliveryDate
+                          ? new Date(item.deliveryDate).toLocaleDateString("en-MY", { month: "short", year: "2-digit" }).toUpperCase()
+                          : ""}
+                      </Text>
+                      {SIZES.map(s => (
+                        <Text key={s} style={[S.td, { width: D.sz, textAlign: "center" }]}>
+                          {(item as any)[`qty${s}`] || ""}
+                        </Text>
+                      ))}
+                      <Text style={[S.td, { width: D.pairs, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
+                        {item.totalPairs || ""}
+                      </Text>
+                      <Text style={[S.tdR, { width: D.total, textAlign: "right", fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" }]}>
+                        {item.lineTotal ? `${currency}${Math.round(item.lineTotal)}` : ""}
+                      </Text>
+                    </View>
+                  ))}
+
+                  {/* Empty filler rows for handwriting */}
+                  {Array.from({ length: EMPTY_ROWS }).map((_, ei) => (
+                    <View key={`e${ei}`} style={S.eRow}>
+                      <View style={[S.eCell, { width: D.price }]} />
+                      <View style={[S.eCell, { width: D.sku }]} />
+                      <View style={[S.eCell, { width: D.main }]} />
+                      <View style={[S.eCell, { width: D.h2u }]} />
+                      <View style={[S.eCell, { width: D.color }]} />
+                      <View style={[S.eCell, { width: D.code }]} />
+                      <View style={[S.eCell, { width: D.mat }]} />
+                      <View style={[S.eCell, { width: D.mat }]} />
+                      <View style={[S.eCell, { width: D.mat }]} />
+                      <View style={[S.eCell, { width: D.mat }]} />
+                      <View style={[S.eCell, { width: D.mat }]} />
+                      <View style={[S.eCell, { flex: 1 }]} />
+                      <View style={[S.eCell, { width: D.logo }]} />
+                      <View style={[S.eCell, { width: D.del }]} />
+                      {SIZES.map(s => <View key={s} style={[S.eCell, { width: D.sz }]} />)}
+                      <View style={[S.eCell, { width: D.pairs }]} />
+                      <View style={{ width: D.total }} />
+                    </View>
+                  ))}
+
+                </View>
+              </View>
+            );
+          })}
+
         </View>
 
         {po.notes && (
-          <View style={{ marginTop: 8, backgroundColor: "#fffbeb", border: "0.5pt solid #fbbf24", borderRadius: 3, padding: 6 }}>
-            <Text style={{ fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, color: "#92400e", marginBottom: 2 }}>NOTES</Text>
-            <Text style={{ color: "#78350f" }}>{po.notes}</Text>
+          <View style={{ marginTop: 8, border: "0.5pt solid #ccc", padding: 5 }}>
+            <Text style={{ fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, marginBottom: 2 }}>NOTES</Text>
+            <Text>{po.notes}</Text>
           </View>
         )}
 
         <View style={S.footer} fixed>
           <Text>Happy2U Fashion Management System — CONFIDENTIAL</Text>
-          <Text>{po.poNumber} · Generated {new Date().toLocaleDateString("en-MY")}</Text>
+          <Text>{po.poNumber} · {supplierName} · Generated {new Date().toLocaleDateString("en-MY")}</Text>
         </View>
       </Page>
     </Document>

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Plus, Search, Upload, X, BookOpen,
   ChevronDown, ChevronUp, Pencil, Trash2,
-  ChevronLeft, ChevronRight, Camera, Box, ShoppingCart,
+  ChevronLeft, ChevronRight, Camera, Box, ShoppingCart, RefreshCw,
 } from "lucide-react";
 
 type PLItem = {
@@ -30,7 +30,7 @@ const SHOE_SIZES = ["36","37","38","39","40","41","42"];
 const CATS = ["heels","flats","sandals","boots","sneakers","wedges","bags","accessories","shoe_care","clearance","keychain","merchandiser"];
 const PAGE_SIZE = 50;
 
-type StatusKey = "all" | "draft" | "active" | "low_stock" | "out_of_stock" | "clearance";
+type StatusKey = "all" | "draft" | "active" | "low_stock" | "out_of_stock" | "clearance" | "archived";
 
 const STATUS_TABS: { key: StatusKey; label: string; dot: string; card: string; text: string; subtext: string; badge: string }[] = [
   { key:"all",          label:"All SKUs",     dot:"bg-gray-400",    card:"bg-white border-gray-300",         text:"text-gray-900",    subtext:"text-gray-400",    badge:"bg-gray-100 text-gray-600 ring-gray-200"     },
@@ -39,6 +39,7 @@ const STATUS_TABS: { key: StatusKey; label: string; dot: string; card: string; t
   { key:"low_stock",    label:"Low Stock",    dot:"bg-amber-400",   card:"bg-amber-50 border-amber-300",     text:"text-amber-800",   subtext:"text-amber-500",   badge:"bg-amber-50 text-amber-700 ring-amber-200"   },
   { key:"out_of_stock", label:"Out of Stock", dot:"bg-gray-400",    card:"bg-gray-100 border-gray-300",      text:"text-gray-700",    subtext:"text-gray-500",    badge:"bg-gray-100 text-gray-600 ring-gray-200"     },
   { key:"clearance",    label:"Clearance",    dot:"bg-red-400",     card:"bg-red-50 border-red-300",         text:"text-red-800",     subtext:"text-red-400",     badge:"bg-red-50 text-red-600 ring-red-200"         },
+  { key:"archived",     label:"Archived",     dot:"bg-slate-400",   card:"bg-slate-50 border-slate-300",     text:"text-slate-700",   subtext:"text-slate-400",   badge:"bg-slate-100 text-slate-600 ring-slate-200"  },
 ];
 
 const BLANK_FORM = {
@@ -96,6 +97,8 @@ export default function ProductLibraryPage() {
   const [form, setForm]           = useState({ ...BLANK_FORM });
   const [saving, setSaving]       = useState(false);
   const [importing, setImporting] = useState(false);
+  const [syncing, setSyncing]     = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
   const [creatingPO, setCreatingPO] = useState<string | null>(null);
 
   // Group-edit modal state
@@ -202,16 +205,26 @@ export default function ProductLibraryPage() {
   const xlsxRef = useRef<HTMLInputElement>(null);
   const singlePhotoInputRef = useRef<HTMLInputElement>(null);
 
+  const [vendorBoxMap, setVendorBoxMap] = useState<Record<string, string>>({});
+
   useEffect(() => {
     fetch("/api/product-library").then(r => r.json()).then(setAllItems).catch(() => {});
     fetch("/api/manufacturers").then(r => r.json()).then(setMfrs).catch(() => {});
+    fetch("/api/vendor-assets")
+      .then(r => r.json())
+      .then((assets: {vendor: string; assetType: string; imageUrl: string}[]) => {
+        const boxMap: Record<string, string> = {};
+        for (const a of assets) if (a.assetType === "box") boxMap[a.vendor] = a.imageUrl;
+        setVendorBoxMap(boxMap);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => { setPage(1); setExpanded(null); setExpandedGroups(new Set()); }, [activeTab, search, catF, sizeF, colorF]);
 
   // Counts per status — by unique Main SKU group (not individual colour entries)
   const counts = useMemo(() => {
-    const sets: Record<string, Set<string>> = { all: new Set(), draft: new Set(), active: new Set(), low_stock: new Set(), out_of_stock: new Set(), clearance: new Set() };
+    const sets: Record<string, Set<string>> = { all: new Set(), draft: new Set(), active: new Set(), low_stock: new Set(), out_of_stock: new Set(), clearance: new Set(), archived: new Set() };
     for (const it of allItems) {
       const gk = it.mainSku ? `sku:${it.mainSku}` : it.sampleOrderId ? `sample:${it.sampleOrderId}` : `single:${it.id}`;
       sets.all.add(gk);
@@ -242,7 +255,7 @@ export default function ProductLibraryPage() {
   }, [allItems, activeTab]);
 
   // Status sort order for the "All SKUs" view — drafts first so pending SKUs are visible
-  const STATUS_ORDER: Record<string, number> = { draft: 0, active: 1, low_stock: 2, out_of_stock: 3, clearance: 4 };
+  const STATUS_ORDER: Record<string, number> = { draft: 0, active: 1, low_stock: 2, out_of_stock: 3, clearance: 4, archived: 5 };
 
   // Filtered + sorted list for current tab + secondary filters
   const filtered = useMemo(() => {
@@ -485,6 +498,25 @@ export default function ProductLibraryPage() {
     }
   }
 
+  async function syncShopifyPhotos() {
+    setSyncing(true); setSyncResult(null);
+    try {
+      const res = await fetch("/api/product-library/sync-shopify", { method: "POST" });
+      const text = await res.text();
+      const d = text ? JSON.parse(text) : {};
+      setSyncing(false);
+      if (res.ok) {
+        setSyncResult(`✓ ${d.photosUpdated ?? 0} photos · ${d.descUpdated ?? 0} descriptions synced from shophappy2u.com (${d.skipped ?? 0} not matched)`);
+        fetch("/api/product-library").then(r => r.json()).then(setAllItems).catch(() => {});
+      } else {
+        setSyncResult(`Error: ${d.error ?? "Sync failed"}`);
+      }
+    } catch (e: any) {
+      setSyncing(false);
+      setSyncResult(`Error: ${e?.message ?? "Sync failed"}`);
+    }
+  }
+
   async function importExcel(file: File) {
     setImporting(true);
     const XLSX = await import("xlsx");
@@ -511,6 +543,11 @@ export default function ProductLibraryPage() {
           <p className="text-gray-500 text-sm">{counts.all} SKUs · {counts.draft ?? 0} pending SKU assignment</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={syncShopifyPhotos} disabled={syncing}
+            className="btn-secondary flex items-center gap-2 text-sm">
+            <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+            {syncing ? "Syncing photos…" : "Sync photos from website"}
+          </button>
           <button onClick={() => xlsxRef.current?.click()} disabled={importing}
             className="btn-secondary flex items-center gap-2 text-sm">
             <Upload size={14} />{importing ? "Importing…" : "Import Excel"}
@@ -522,6 +559,11 @@ export default function ProductLibraryPage() {
           </button>
         </div>
       </div>
+      {syncResult && (
+        <div className={`px-4 py-2 rounded-lg text-sm ${syncResult.startsWith("✓") ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
+          {syncResult}
+        </div>
+      )}
 
       {/* ── Status tab cards ── */}
       <div className="grid grid-cols-6 gap-3">
@@ -619,7 +661,7 @@ export default function ProductLibraryPage() {
       </div>
 
       {/* ── Product list section ── */}
-      <div className="card overflow-hidden">
+      <div className="card [overflow:clip]">
 
         {/* Section header — clearly shows what tab is active */}
         <div className={`px-5 py-4 border-b border-gray-100 flex items-center justify-between ${
@@ -706,12 +748,12 @@ export default function ProductLibraryPage() {
                       </td>
                       <td className="px-2 py-2">
                         {firstPhoto ? (
-                          <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
-                            <Image src={firstPhoto} alt={row.items[0].productName} width={40} height={40} className="object-cover w-full h-full" />
+                          <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
+                            <Image src={firstPhoto} alt={row.items[0].productName} width={64} height={64} className="object-cover w-full h-full" />
                           </div>
                         ) : (
-                          <div className="w-10 h-10 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center">
-                            <Camera size={12} className="text-gray-300" />
+                          <div className="w-16 h-16 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center">
+                            <Camera size={16} className="text-gray-300" />
                           </div>
                         )}
                       </td>
@@ -793,18 +835,19 @@ export default function ProductLibraryPage() {
 
                       return (
                         <React.Fragment key={item.id}>
-                          <tr className="bg-white hover:bg-brand-50/30 transition-colors border-l-4 border-brand-300">
+                          <tr className="bg-white hover:bg-brand-50/30 transition-colors border-l-4 border-brand-300 cursor-pointer"
+                            onClick={() => setExpanded(isDetail ? null : item.id)}>
                             {/* Ref indented */}
                             <td className="pl-8 pr-4 py-2.5 font-mono text-[10px] text-gray-400">{item.libNumber}</td>
                             {/* Photo */}
                             <td className="px-2 py-2">
                               {item.shoePhotoUrl ? (
-                                <div className="w-8 h-8 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
-                                  <Image src={item.shoePhotoUrl} alt={item.colorName ?? ""} width={32} height={32} className="object-cover w-full h-full" />
+                                <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
+                                  <Image src={item.shoePhotoUrl} alt={item.colorName ?? ""} width={48} height={48} className="object-cover w-full h-full" />
                                 </div>
                               ) : (
-                                <div className="w-8 h-8 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center">
-                                  <Camera size={10} className="text-gray-300" />
+                                <div className="w-12 h-12 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center">
+                                  <Camera size={12} className="text-gray-300" />
                                 </div>
                               )}
                             </td>
@@ -872,7 +915,7 @@ export default function ProductLibraryPage() {
                               ) : <span className="text-gray-300 text-xs">—</span>}
                             </td>
                             {/* Actions */}
-                            <td className="px-4 py-2.5">
+                            <td className="px-4 py-2.5" onClick={e => e.stopPropagation()}>
                               <div className="flex items-center gap-0.5 justify-end">
                                 <button onClick={() => setExpanded(isDetail ? null : item.id)}
                                   className="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors">
@@ -909,12 +952,12 @@ export default function ProductLibraryPage() {
                     <td className="px-4 py-3 font-mono text-[11px] text-gray-400">{item.libNumber}</td>
                     <td className="px-2 py-2">
                       {item.shoePhotoUrl ? (
-                        <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-100 bg-gray-50 shrink-0">
-                          <Image src={item.shoePhotoUrl} alt={item.productName} width={40} height={40} className="object-cover w-full h-full" />
+                        <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-100 bg-gray-50 shrink-0">
+                          <Image src={item.shoePhotoUrl} alt={item.productName} width={64} height={64} className="object-cover w-full h-full" />
                         </div>
                       ) : (
-                        <div className="w-10 h-10 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center">
-                          <Camera size={12} className="text-gray-300" />
+                        <div className="w-16 h-16 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center">
+                          <Camera size={16} className="text-gray-300" />
                         </div>
                       )}
                     </td>
@@ -1331,31 +1374,42 @@ export default function ProductLibraryPage() {
                   ))}
                 </div>
                 {/* Box photo */}
-                <div className="flex items-start gap-3">
-                  <div className="flex flex-col items-center gap-1">
-                    <div
-                      onClick={() => triggerPhotoUpload("boxPhotoUrl")}
-                      className="relative w-24 aspect-square rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 hover:border-brand-400 hover:bg-brand-50 transition-colors cursor-pointer overflow-hidden flex items-center justify-center"
-                    >
-                      {(form as any).boxPhotoUrl ? (
-                        <>
-                          <Image src={(form as any).boxPhotoUrl} alt="Box" fill className="object-cover" />
-                          <div className="absolute inset-0 bg-black/30 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <span className="text-white text-[10px] font-medium">Change</span>
-                          </div>
-                        </>
-                      ) : uploadingPhoto === "boxPhotoUrl" ? (
-                        <p className="text-[10px] text-gray-400">Uploading…</p>
-                      ) : (
-                        <Box size={16} className="text-gray-300" />
-                      )}
+                {(() => {
+                  const customBox   = (form as any).boxPhotoUrl as string;
+                  const vendorBox   = form.brand ? vendorBoxMap[form.brand] ?? "" : "";
+                  const displayBox  = customBox || vendorBox;
+                  const isVendorDef = !customBox && !!vendorBox;
+                  return (
+                    <div className="flex items-start gap-3">
+                      <div className="flex flex-col items-center gap-1">
+                        <div
+                          onClick={() => triggerPhotoUpload("boxPhotoUrl")}
+                          className="relative w-24 aspect-square rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 hover:border-brand-400 hover:bg-brand-50 transition-colors cursor-pointer overflow-hidden flex items-center justify-center"
+                        >
+                          {displayBox ? (
+                            <>
+                              <Image src={displayBox} alt="Box" fill className="object-contain p-1" />
+                              <div className="absolute inset-0 bg-black/30 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <span className="text-white text-[10px] font-medium">{isVendorDef ? "Upload Custom" : "Change"}</span>
+                              </div>
+                            </>
+                          ) : uploadingPhoto === "boxPhotoUrl" ? (
+                            <p className="text-[10px] text-gray-400">Uploading…</p>
+                          ) : (
+                            <Box size={16} className="text-gray-300" />
+                          )}
+                        </div>
+                        <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Box</span>
+                        {isVendorDef && (
+                          <span className="text-[9px] text-blue-400">{form.brand} default</span>
+                        )}
+                        {customBox && (
+                          <button onClick={() => setF("boxPhotoUrl", "")} className="text-[9px] text-red-400 hover:text-red-600">Remove</button>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Box</span>
-                    {(form as any).boxPhotoUrl && (
-                      <button onClick={() => setF("boxPhotoUrl", "")} className="text-[9px] text-red-400 hover:text-red-600">Remove</button>
-                    )}
-                  </div>
-                </div>
+                  );
+                })()}
                 <input ref={singlePhotoInputRef} type="file" accept="image/*" className="hidden" onChange={handleSinglePhotoChange} />
               </div>
               <div><label className="label">Notes</label><textarea className="input" rows={2} value={form.notes} onChange={e=>setF("notes",e.target.value)}/></div>
@@ -1371,12 +1425,49 @@ export default function ProductLibraryPage() {
   );
 }
 
+// ── PO History types ──────────────────────────────────────────────────────────
+type POHistoryItem = { h2uSku: string | null; colorName: string | null; colorCode: string | null; totalPairs: number; discountPrice: number | null };
+type POHistoryEntry = {
+  id: string; poNumber: string; date: string; status: string; poType: string | null;
+  manufacturer: { id: string; name: string } | null;
+  totalPairs: number; totalValue: number;
+  items: POHistoryItem[];
+};
+
+const PO_STATUS_STYLE: Record<string, string> = {
+  draft:         "bg-gray-100 text-gray-600",
+  submitted:     "bg-blue-50 text-blue-700",
+  in_production: "bg-amber-50 text-amber-700",
+  shipped:       "bg-teal-50 text-teal-700",
+  closed:        "bg-green-50 text-green-700",
+};
+const PO_TYPE_LABEL: Record<string, string> = {
+  test: "Test", reorder: "Reorder", replen: "Replen", clear: "Clearance",
+};
+
 // ── Item detail panel (shared by both grouped and flat views) ─────────────────
 function ItemDetailRow({ item, colSpan, onEdit, onAssignSku }: { item: PLItem; colSpan: number; onEdit: (item: PLItem) => void; onAssignSku?: (item: PLItem) => void }) {
+  const [activeTab, setActiveTab] = useState<"overview" | "po-history">("overview");
+  const [poHistory, setPoHistory] = useState<POHistoryEntry[] | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === "po-history" && poHistory === null) {
+      setLoadingHistory(true);
+      fetch(`/api/product-library/${item.id}/po-history`)
+        .then(r => r.json())
+        .then(data => { setPoHistory(Array.isArray(data) ? data : []); setLoadingHistory(false); })
+        .catch(() => { setPoHistory([]); setLoadingHistory(false); });
+    }
+  }, [activeTab, item.id, poHistory]);
+
   const sizes   = parseSizes(item.availableSizes);
   const sizeInv = parseSizeInv(item.sizeInventory);
   const margin  = item.costRm && item.sellingPrice
     ? Math.round(((item.sellingPrice - item.costRm) / item.sellingPrice) * 100) : null;
+
+  const totalHistoryPairs = poHistory?.reduce((s, p) => s + p.totalPairs, 0) ?? 0;
+
   return (
     <tr className="bg-slate-50/60">
       <td colSpan={colSpan} className="px-4 py-4">
@@ -1394,93 +1485,224 @@ function ItemDetailRow({ item, colSpan, onEdit, onAssignSku }: { item: PLItem; c
             </button>
           </div>
         )}
-        <div className="grid grid-cols-4 gap-3 text-xs">
-          {(item.shoePhotoUrl || item.boxPhotoUrl) && (
-            <div className="col-span-4 flex gap-3 mb-1">
-              {item.shoePhotoUrl && (
-                <div className="bg-white rounded-xl border border-gray-100 p-3 flex flex-col gap-2">
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Shoe Photo</p>
-                  <Image src={item.shoePhotoUrl} alt="Shoe" width={160} height={120} className="rounded-lg object-cover h-28 w-40" />
-                </div>
+
+        {/* ── Tab switcher ── */}
+        <div className="flex gap-1 mb-4 border-b border-gray-200">
+          {(["overview", "po-history"] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-colors ${
+                activeTab === tab
+                  ? "border-brand-600 text-brand-700 bg-white"
+                  : "border-transparent text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              {tab === "overview" ? "Overview" : "Purchase History"}
+              {tab === "po-history" && poHistory !== null && poHistory.length > 0 && (
+                <span className="ml-1.5 bg-brand-100 text-brand-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  {poHistory.length}
+                </span>
               )}
-              {item.boxPhotoUrl && (
-                <div className="bg-white rounded-xl border border-gray-100 p-3 flex flex-col gap-2">
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Box Photo</p>
-                  <Image src={item.boxPhotoUrl} alt="Box" width={160} height={120} className="rounded-lg object-cover h-28 w-40" />
-                </div>
-              )}
-            </div>
-          )}
-          <div className="bg-white rounded-xl p-3 border border-gray-100">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Size inventory &amp; SKUs</p>
-            {sizes.length > 0 ? (
-              <div className="space-y-1.5">
-                {sizes.map(sz => {
-                  const qty = sizeInv[sz] ?? 0;
-                  const pct = item.inventoryTotal ? Math.round(qty / item.inventoryTotal * 100) : 0;
-                  const detailSku = item.h2uSku ? `${item.h2uSku}${sz}` : null;
-                  return (
-                    <div key={sz} className="flex items-center gap-2">
-                      <span className="w-7 text-[11px] font-bold text-gray-500 shrink-0">EU {sz}</span>
-                      {detailSku && <span className="font-mono text-[10px] text-gray-400 bg-gray-50 px-1 rounded shrink-0">{detailSku}</span>}
-                      <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${qty === 0 ? "bg-gray-200" : qty <= 3 ? "bg-red-400" : qty <= 10 ? "bg-amber-400" : "bg-teal-400"}`} style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className={`text-[11px] font-bold w-5 text-right shrink-0 ${qty === 0 ? "text-gray-300" : qty <= 3 ? "text-red-600" : qty <= 10 ? "text-amber-600" : "text-teal-700"}`}>{qty}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : item.h2uSku ? (
-              <div>
-                <p className="text-[10px] text-gray-400 mb-1.5">No sizes yet. SKU pattern:</p>
-                <div className="flex flex-wrap gap-1">
-                  {["36","37","38","39","40","41","42"].map(sz => (
-                    <span key={sz} className="font-mono text-[10px] bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded text-gray-500">{item.h2uSku}{sz}</span>
-                  ))}
-                </div>
-              </div>
-            ) : <p className="text-gray-300">—</p>}
-          </div>
-          <div className="bg-white rounded-xl p-3 border border-gray-100">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Inventory</p>
-            <div className="space-y-1.5">
-              <div className="flex justify-between"><span className="text-gray-500">All locations</span><span className="font-bold text-gray-900">{item.inventoryTotal ?? "—"}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">H2U Warehouse</span><span className="font-semibold text-gray-900">{item.warehouseQty ?? 0}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Shopify type</span><span className="text-gray-600">{item.productType ?? "—"}</span></div>
-            </div>
-          </div>
-          <div className="bg-white rounded-xl p-3 border border-gray-100">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Pricing</p>
-            <div className="space-y-1.5">
-              <div className="flex justify-between"><span className="text-gray-500">Selling price</span><span className="font-bold text-gray-900">{item.sellingPrice ? `RM ${item.sellingPrice.toFixed(2)}` : "—"}</span></div>
-              {item.compareAtPrice && item.compareAtPrice > (item.sellingPrice ?? 0) && (
-                <div className="flex justify-between"><span className="text-gray-500">Was</span><span className="text-gray-400 line-through">RM {item.compareAtPrice.toFixed(2)}</span></div>
-              )}
-              <div className="flex justify-between"><span className="text-gray-500">Cost (RM)</span><span className="text-gray-700">{item.costRm ? `RM ${item.costRm.toFixed(2)}` : "—"}</span></div>
-              {margin != null && (
-                <div className="flex justify-between pt-1 border-t border-gray-100">
-                  <span className="text-gray-500">Gross margin</span>
-                  <span className={`font-bold ${margin >= 40 ? "text-teal-700" : margin >= 25 ? "text-amber-600" : "text-red-600"}`}>{margin}%</span>
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="bg-white rounded-xl p-3 border border-gray-100">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Material specs</p>
-            {[["Upper",item.materialUpper],["Lining",item.materialLining],["Outsole",item.materialOutsole],["Heel",item.heelSpec]].some(([,v])=>v)
-              ? <div className="space-y-1">
-                  {[["Upper",item.materialUpper],["Lining",item.materialLining],["Midsole",item.materialMidsole],["Outsole",item.materialOutsole],["Hardware",item.hardware],["Heel",item.heelSpec]].filter(([,v])=>v).map(([k,v])=>(
-                    <div key={k as string} className="flex justify-between gap-2">
-                      <span className="text-gray-400 shrink-0">{k}</span>
-                      <span className="text-gray-700 text-right truncate">{v as string}</span>
-                    </div>
-                  ))}
-                </div>
-              : <p className="text-gray-300 text-xs">No specs yet</p>}
-          </div>
+            </button>
+          ))}
         </div>
-        {item.notes && <p className="mt-2 text-xs text-gray-500 italic px-1">{item.notes}</p>}
+
+        {/* ── Overview tab ── */}
+        {activeTab === "overview" && (
+          <div className="grid grid-cols-4 gap-3 text-xs">
+            {(item.shoePhotoUrl || item.boxPhotoUrl) && (
+              <div className="col-span-4 flex gap-3 mb-1">
+                {item.shoePhotoUrl && (
+                  <div className="bg-white rounded-xl border border-gray-100 p-3 flex flex-col gap-2">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Shoe Photo</p>
+                    <Image src={item.shoePhotoUrl} alt="Shoe" width={160} height={120} className="rounded-lg object-cover h-28 w-40" />
+                  </div>
+                )}
+                {item.boxPhotoUrl && (
+                  <div className="bg-white rounded-xl border border-gray-100 p-3 flex flex-col gap-2">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Box Photo</p>
+                    <Image src={item.boxPhotoUrl} alt="Box" width={160} height={120} className="rounded-lg object-cover h-28 w-40" />
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="bg-white rounded-xl p-3 border border-gray-100">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Size inventory &amp; SKUs</p>
+              {sizes.length > 0 ? (
+                <div className="space-y-1.5">
+                  {sizes.map(sz => {
+                    const qty = sizeInv[sz] ?? 0;
+                    const pct = item.inventoryTotal ? Math.round(qty / item.inventoryTotal * 100) : 0;
+                    const detailSku = item.h2uSku ? `${item.h2uSku}${sz}` : null;
+                    return (
+                      <div key={sz} className="flex items-center gap-2">
+                        <span className="w-7 text-[11px] font-bold text-gray-500 shrink-0">EU {sz}</span>
+                        {detailSku && <span className="font-mono text-[10px] text-gray-400 bg-gray-50 px-1 rounded shrink-0">{detailSku}</span>}
+                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${qty === 0 ? "bg-gray-200" : qty <= 3 ? "bg-red-400" : qty <= 10 ? "bg-amber-400" : "bg-teal-400"}`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className={`text-[11px] font-bold w-5 text-right shrink-0 ${qty === 0 ? "text-gray-300" : qty <= 3 ? "text-red-600" : qty <= 10 ? "text-amber-600" : "text-teal-700"}`}>{qty}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : item.h2uSku ? (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                    <p className="text-[10px] text-amber-600 font-medium">Pending Shopify sync</p>
+                  </div>
+                  <p className="text-[10px] text-gray-400 mb-1.5">Per-size SKUs ready:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {["36","37","38","39","40","41","42"].map(sz => (
+                      <span key={sz} className="font-mono text-[10px] bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded text-gray-500">{item.h2uSku}{sz}</span>
+                    ))}
+                  </div>
+                </div>
+              ) : <p className="text-gray-300">—</p>}
+            </div>
+            <div className="bg-white rounded-xl p-3 border border-gray-100">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Inventory</p>
+              <div className="space-y-1.5">
+                <div className="flex justify-between"><span className="text-gray-500">All locations</span><span className="font-bold text-gray-900">{item.inventoryTotal ?? "—"}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">H2U Warehouse</span><span className="font-semibold text-gray-900">{item.warehouseQty ?? 0}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Shopify type</span><span className="text-gray-600">{item.productType ?? "—"}</span></div>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl p-3 border border-gray-100">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Pricing</p>
+              <div className="space-y-1.5">
+                <div className="flex justify-between"><span className="text-gray-500">Selling price</span><span className="font-bold text-gray-900">{item.sellingPrice ? `RM ${item.sellingPrice.toFixed(2)}` : "—"}</span></div>
+                {item.compareAtPrice && item.compareAtPrice > (item.sellingPrice ?? 0) && (
+                  <div className="flex justify-between"><span className="text-gray-500">Was</span><span className="text-gray-400 line-through">RM {item.compareAtPrice.toFixed(2)}</span></div>
+                )}
+                <div className="flex justify-between"><span className="text-gray-500">Cost (RM)</span><span className="text-gray-700">{item.costRm ? `RM ${item.costRm.toFixed(2)}` : "—"}</span></div>
+                {margin != null && (
+                  <div className="flex justify-between pt-1 border-t border-gray-100">
+                    <span className="text-gray-500">Gross margin</span>
+                    <span className={`font-bold ${margin >= 40 ? "text-teal-700" : margin >= 25 ? "text-amber-600" : "text-red-600"}`}>{margin}%</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="bg-white rounded-xl p-3 border border-gray-100">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Material specs</p>
+              {[["Upper",item.materialUpper],["Lining",item.materialLining],["Outsole",item.materialOutsole],["Heel",item.heelSpec]].some(([,v])=>v)
+                ? <div className="space-y-1">
+                    {[["Upper",item.materialUpper],["Lining",item.materialLining],["Midsole",item.materialMidsole],["Outsole",item.materialOutsole],["Hardware",item.hardware],["Heel",item.heelSpec]].filter(([,v])=>v).map(([k,v])=>(
+                      <div key={k as string} className="flex justify-between gap-2">
+                        <span className="text-gray-400 shrink-0">{k}</span>
+                        <span className="text-gray-700 text-right truncate">{v as string}</span>
+                      </div>
+                    ))}
+                  </div>
+                : <p className="text-gray-300 text-xs">No specs yet</p>}
+            </div>
+          </div>
+        )}
+
+        {/* ── Purchase History tab ── */}
+        {activeTab === "po-history" && (
+          <div>
+            {loadingHistory ? (
+              <div className="py-8 text-center text-xs text-gray-400">Loading purchase history…</div>
+            ) : !poHistory || poHistory.length === 0 ? (
+              <div className="py-10 text-center">
+                <p className="text-sm font-medium text-gray-500">No purchase orders found for this SKU</p>
+                <p className="text-xs text-gray-400 mt-1">POs will appear here once created from this product.</p>
+              </div>
+            ) : (
+              <div>
+                {/* Summary bar */}
+                <div className="flex items-center gap-6 mb-4 bg-white rounded-xl border border-gray-100 px-4 py-3 text-xs">
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Total POs</p>
+                    <p className="text-xl font-black text-gray-900 leading-tight">{poHistory.length}</p>
+                  </div>
+                  <div className="w-px h-8 bg-gray-100" />
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Total Pairs Ordered</p>
+                    <p className="text-xl font-black text-brand-700 leading-tight">{totalHistoryPairs.toLocaleString()}</p>
+                  </div>
+                  <div className="w-px h-8 bg-gray-100" />
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Latest Order</p>
+                    <p className="text-sm font-bold text-gray-900 leading-tight">
+                      {new Date(poHistory[0].date).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
+                    </p>
+                  </div>
+                </div>
+
+                {/* PO list */}
+                <div className="bg-white rounded-xl border border-gray-100 divide-y divide-gray-50">
+                  {poHistory.map((po, idx) => (
+                    <div key={po.id}>
+                      <a href={`/dashboard/purchase-orders?open=${po.id}`}
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
+                        {/* PO number + latest badge */}
+                        <div className="w-36 shrink-0">
+                          <span className="font-mono font-bold text-brand-700 text-xs">{po.poNumber}</span>
+                          {idx === 0 && <span className="ml-1.5 text-[9px] font-semibold bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded-full uppercase">Latest</span>}
+                        </div>
+                        {/* Date */}
+                        <div className="w-24 shrink-0 text-xs text-gray-500">
+                          {new Date(po.date).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
+                        </div>
+                        {/* Supplier */}
+                        <div className="flex-1 text-xs text-gray-700 truncate">{po.manufacturer?.name ?? "—"}</div>
+                        {/* Type */}
+                        <div className="w-20 shrink-0">
+                          {po.poType
+                            ? <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize">{PO_TYPE_LABEL[po.poType] ?? po.poType}</span>
+                            : <span className="text-gray-300 text-xs">—</span>}
+                        </div>
+                        {/* Status */}
+                        <div className="w-20 shrink-0">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${PO_STATUS_STYLE[po.status] ?? "bg-gray-100 text-gray-600"}`}>
+                            {po.status.replace("_", " ")}
+                          </span>
+                        </div>
+                        {/* Pairs */}
+                        <div className="w-12 shrink-0 text-right text-xs font-bold text-gray-900">
+                          {po.totalPairs > 0 ? po.totalPairs.toLocaleString() : "—"}
+                        </div>
+                        {/* Value */}
+                        <div className="w-20 shrink-0 text-right text-xs text-gray-600">
+                          {po.totalValue > 0 ? `¥${po.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : "—"}
+                        </div>
+                        {/* Arrow */}
+                        <div className="w-4 shrink-0 text-gray-300 text-xs">›</div>
+                      </a>
+
+                      {/* Per-colour breakdown */}
+                      {po.items.length > 0 && (
+                        <div className="px-4 pb-3 flex flex-wrap gap-2">
+                          {po.items
+                            .filter(it => it.totalPairs > 0)
+                            .map((it, ii) => (
+                              <div key={ii} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5">
+                                {it.colorCode && (
+                                  <span className="text-[10px] font-mono font-semibold text-gray-500 bg-white border border-gray-200 px-1 rounded">{it.colorCode}</span>
+                                )}
+                                <span className="text-[11px] font-medium text-gray-700">{it.colorName ?? it.h2uSku ?? "—"}</span>
+                                <span className="text-[11px] font-bold text-brand-700">{it.totalPairs} pairs</span>
+                                {it.discountPrice && (
+                                  <span className="text-[10px] text-gray-400">¥{it.discountPrice}</span>
+                                )}
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {item.notes && activeTab === "overview" && <p className="mt-2 text-xs text-gray-500 italic px-1">{item.notes}</p>}
       </td>
     </tr>
   );

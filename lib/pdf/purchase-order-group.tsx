@@ -197,101 +197,154 @@ export function GroupPurchaseOrderPDF({ pos, groupCode, supplier }: { pos: any[]
             <View style={{ width: D.total }} />
           </View>
 
-          {/* ── Product blocks (photo spans all rows via flex-row) ── */}
-          {pos.map((po: any) => {
-            const items       = po.items ?? [];
-            const baseLabel   = po.productName || po.brand || "";
-            const deliveryLabel = po.deliveryDate
-              ? new Date(po.deliveryDate).toLocaleDateString("en-MY", { month: "short", year: "2-digit" }).toUpperCase()
-              : "";
-            const photo = items[0]?.photoUrl ?? po.photoUrl ?? null;
+          {/* ── Product blocks: one block per supplierSku group (matches Excel layout) ── */}
+          {pos.flatMap((po: any) => {
+            const isMulti    = pos.length > 1;
+            const poSupplier = po.manufacturer?.name ?? supplier;
 
-            return (
-              <View key={po.id} style={S.block} wrap={false}>
+            // Group items by model: use h2uSku prefix (strip trailing color-code letters)
+            // because supplierSku is only set on the first colour row; others have null or the manufacturer name
+            const groups: { supplierSku: string; items: any[] }[] = [];
+            for (const item of po.items ?? []) {
+              // "S1625-2H" → "S1625-2",  "S1727BR" → "S1727",  "S1701RG" → "S1701"
+              const modelKey = item.h2uSku?.replace(/[A-Z]+$/, "") || item.supplierSku || "";
+              const last = groups[groups.length - 1];
+              if (last && last.supplierSku === modelKey) {
+                last.items.push(item);
+              } else {
+                // Display the real supplier SKU when the first item has one; fall back to derived key
+                const displaySku = (item.supplierSku && /^[A-Z]\d/.test(item.supplierSku))
+                  ? item.supplierSku
+                  : modelKey;
+                groups.push({ supplierSku: displaySku, items: [item] });
+              }
+            }
 
-                {/* ── Photo column (spans all rows automatically via flex height) ── */}
-                <View style={S.photoCol}>
-                  {photo
-                    ? <Image src={photo} style={S.photoImg} />
-                    : <View style={[S.photoImg, { backgroundColor: "#f3f4f6" }]} />}
-                  <Text style={S.photoSup}>{supplier}</Text>
-                  {deliveryLabel ? <Text style={S.photoRed}>{deliveryLabel}</Text> : null}
+            const blocks: React.ReactNode[] = [];
+
+            // PO separator header when printing multiple POs together
+            if (isMulti) {
+              const poTotal = (po.items ?? []).reduce((s: number, i: any) => s + (i.totalPairs ?? 0), 0);
+              blocks.push(
+                <View key={`sep-${po.id}`} style={{ backgroundColor: "#e5e5e5", padding: "4 6", flexDirection: "row", justifyContent: "space-between" }}>
+                  <Text style={{ fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7.5 }}>
+                    {po.poNumber}  ·  {poSupplier}
+                  </Text>
+                  <Text style={{ fontSize: 7, color: "#555" }}>{poTotal} pairs</Text>
                 </View>
+              );
+            }
 
-                {/* ── Data section ── */}
-                <View style={S.dataSec}>
+            // One block per supplierSku group
+            groups.forEach((grp, gIdx) => {
+              const photo         = grp.items[0]?.photoUrl ?? po.photoUrl ?? null;
+              const deliveryDate  = grp.items[0]?.deliveryDate ?? po.deliveryDate;
+              const deliveryLabel = deliveryDate
+                ? new Date(deliveryDate).toLocaleDateString("en-MY", { month: "short", year: "2-digit" }).toUpperCase()
+                : "";
 
-                  {/* Color variant rows */}
-                  {items.map((item: any, i: number) => (
-                    <View key={item.id} style={S.tr}>
-                      <Text style={[S.td, { width: D.price, textAlign: "right" }]}>
-                        {item.discountPrice ? `¥${item.discountPrice}` : ""}
-                      </Text>
-                      <Text style={[S.td, { width: D.sku }]}>
-                        {i === 0 ? (item.supplierSku || "") : ""}
-                      </Text>
-                      <Text style={[S.td, { width: D.main, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
-                        {item.mainSku || ""}
-                      </Text>
-                      <Text style={[S.td, { width: D.h2u, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
-                        {item.mainSku && item.colorCode
-                          ? `${item.mainSku}${item.colorCode}`
-                          : item.h2uSku || baseLabel}
-                      </Text>
-                      <Text style={[S.td, { width: D.color }]}>{item.colorName || ""}</Text>
-                      <Text style={[S.td, { width: D.code }]}>{item.colorCode || ""}</Text>
-                      <Text style={[S.td, { width: D.mat }]}>{item.materialUpper || ""}</Text>
-                      <Text style={[S.td, { width: D.mat }]}>{item.materialLining || ""}</Text>
-                      <Text style={[S.td, { width: D.mat }]}>{item.materialMidsole || ""}</Text>
-                      <Text style={[S.td, { width: D.mat }]}>{item.materialOutsole || ""}</Text>
-                      <Text style={[S.td, { width: D.mat }]}>{item.hardware || ""}</Text>
-                      <Text style={[S.td, { flex: 1 }]}>{item.remark || ""}</Text>
-                      <Text style={[S.td, { width: D.logo }]}>{item.logoSpec || ""}</Text>
-                      <Text style={[S.td, { width: D.del }]}>
-                        {item.deliveryDate
-                          ? new Date(item.deliveryDate).toLocaleDateString("en-MY", { month: "short", year: "2-digit" }).toUpperCase()
-                          : ""}
-                      </Text>
-                      {SIZES.map(s => (
-                        <Text key={s} style={[S.td, { width: D.sz, textAlign: "center" }]}>
-                          {(item as any)[`qty${s}`] || ""}
+              blocks.push(
+                <View key={`${po.id}-${gIdx}`} style={S.block} wrap={false}>
+
+                  {/* Photo column */}
+                  <View style={S.photoCol}>
+                    {photo
+                      ? <Image src={photo} style={S.photoImg} />
+                      : <View style={[S.photoImg, { backgroundColor: "#f3f4f6" }]} />}
+                    <Text style={S.photoSup}>{poSupplier}</Text>
+                    {deliveryLabel ? <Text style={S.photoRed}>{deliveryLabel}</Text> : null}
+                  </View>
+
+                  {/* Data section */}
+                  <View style={S.dataSec}>
+
+                    {/* Colour variant rows */}
+                    {grp.items.map((item: any, i: number) => (
+                      <View key={item.id} style={S.tr}>
+                        <Text style={[S.td, { width: D.price, textAlign: "right" }]}>
+                          {i === 0 && item.discountPrice ? `¥${item.discountPrice}` : ""}
                         </Text>
-                      ))}
-                      <Text style={[S.td, { width: D.pairs, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
-                        {item.totalPairs || ""}
-                      </Text>
-                      <Text style={[S.tdR, { width: D.total, textAlign: "right", fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" }]}>
-                        {item.lineTotal ? `¥${Math.round(item.lineTotal)}` : ""}
-                      </Text>
-                    </View>
-                  ))}
+                        <Text style={[S.td, { width: D.sku }]}>
+                          {i === 0 ? (item.supplierSku || "") : ""}
+                        </Text>
+                        <Text style={[S.td, { width: D.main, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
+                          {i === 0 ? grp.supplierSku : ""}
+                        </Text>
+                        <Text style={[S.td, { width: D.h2u, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
+                          {item.h2uSku || ""}
+                        </Text>
+                        <Text style={[S.td, { width: D.color }]}>{item.colorName || ""}</Text>
+                        <Text style={[S.td, { width: D.code }]}>{item.colorCode || ""}</Text>
+                        {/* Material specs — shown only on first colour of each model group */}
+                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialUpper   || "") : ""}</Text>
+                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialLining  || "") : ""}</Text>
+                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialMidsole || "") : ""}</Text>
+                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialOutsole || "") : ""}</Text>
+                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.hardware        || "") : ""}</Text>
 
-                  {/* Empty filler rows for handwriting */}
-                  {Array.from({ length: EMPTY_ROWS }).map((_, ei) => (
-                    <View key={`e${ei}`} style={S.eRow}>
-                      <View style={[S.eCell, { width: D.price }]} />
-                      <View style={[S.eCell, { width: D.sku }]} />
-                      <View style={[S.eCell, { width: D.main }]} />
-                      <View style={[S.eCell, { width: D.h2u }]} />
-                      <View style={[S.eCell, { width: D.color }]} />
-                      <View style={[S.eCell, { width: D.code }]} />
-                      <View style={[S.eCell, { width: D.mat }]} />
-                      <View style={[S.eCell, { width: D.mat }]} />
-                      <View style={[S.eCell, { width: D.mat }]} />
-                      <View style={[S.eCell, { width: D.mat }]} />
-                      <View style={[S.eCell, { width: D.mat }]} />
-                      <View style={[S.eCell, { flex: 1 }]} />
-                      <View style={[S.eCell, { width: D.logo }]} />
-                      <View style={[S.eCell, { width: D.del }]} />
-                      {SIZES.map(s => <View key={s} style={[S.eCell, { width: D.sz }]} />)}
-                      <View style={[S.eCell, { width: D.pairs }]} />
-                      <View style={{ width: D.total }} />
-                    </View>
-                  ))}
+                        {/* REMARK: text + shoe box design image */}
+                        <View style={[S.td, { flex: 1, flexDirection: "column" }]}>
+                          {i === 0 && item.remark ? <Text>{item.remark}</Text> : null}
+                          {i === 0 && item.boxDesignUri ? (
+                            <Image src={item.boxDesignUri} style={{ width: "100%", height: 64, objectFit: "contain", marginTop: 2 }} />
+                          ) : null}
+                        </View>
 
+                        {/* LOGO: logo design image + spec text */}
+                        <View style={[S.td, { width: D.logo, flexDirection: "column", alignItems: "center" }]}>
+                          {i === 0 && item.logoDesignUri ? (
+                            <Image src={item.logoDesignUri} style={{ width: D.logo - 4, height: 52, objectFit: "contain" }} />
+                          ) : null}
+                          {i === 0 && item.logoSpec ? <Text style={{ marginTop: 1 }}>{item.logoSpec}</Text> : null}
+                        </View>
+                        <Text style={[S.td, { width: D.del }]}>
+                          {i === 0 && item.deliveryDate
+                            ? new Date(item.deliveryDate).toLocaleDateString("en-MY", { month: "short", year: "2-digit" }).toUpperCase()
+                            : ""}
+                        </Text>
+                        {SIZES.map(s => (
+                          <Text key={s} style={[S.td, { width: D.sz, textAlign: "center" }]}>
+                            {(item as any)[`qty${s}`] || ""}
+                          </Text>
+                        ))}
+                        <Text style={[S.td, { width: D.pairs, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
+                          {item.totalPairs || ""}
+                        </Text>
+                        <Text style={[S.tdR, { width: D.total, textAlign: "right", fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" }]}>
+                          {item.lineTotal ? `¥${Math.round(item.lineTotal)}` : ""}
+                        </Text>
+                      </View>
+                    ))}
+
+                    {/* Empty filler rows for handwriting */}
+                    {Array.from({ length: EMPTY_ROWS }).map((_, ei) => (
+                      <View key={`e${ei}`} style={S.eRow}>
+                        <View style={[S.eCell, { width: D.price }]} />
+                        <View style={[S.eCell, { width: D.sku }]} />
+                        <View style={[S.eCell, { width: D.main }]} />
+                        <View style={[S.eCell, { width: D.h2u }]} />
+                        <View style={[S.eCell, { width: D.color }]} />
+                        <View style={[S.eCell, { width: D.code }]} />
+                        <View style={[S.eCell, { width: D.mat }]} />
+                        <View style={[S.eCell, { width: D.mat }]} />
+                        <View style={[S.eCell, { width: D.mat }]} />
+                        <View style={[S.eCell, { width: D.mat }]} />
+                        <View style={[S.eCell, { width: D.mat }]} />
+                        <View style={[S.eCell, { flex: 1 }]} />
+                        <View style={[S.eCell, { width: D.logo }]} />
+                        <View style={[S.eCell, { width: D.del }]} />
+                        {SIZES.map(s => <View key={s} style={[S.eCell, { width: D.sz }]} />)}
+                        <View style={[S.eCell, { width: D.pairs }]} />
+                        <View style={{ width: D.total }} />
+                      </View>
+                    ))}
+
+                  </View>
                 </View>
-              </View>
-            );
+              );
+            });
+
+            return blocks;
           })}
 
         </View>
