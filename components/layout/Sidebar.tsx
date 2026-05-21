@@ -6,7 +6,7 @@ import { signOut, useSession } from "next-auth/react";
 import {
   LayoutDashboard, Building2, Layers, ClipboardList, ShoppingCart,
   Container, PackageCheck, TrendingUp, Settings, LogOut, ChevronRight,
-  Sparkles, Star, PackageSearch, BookOpen, CreditCard, AlertTriangle, Store,
+  Sparkles, Star, PackageSearch, BookOpen, CreditCard, AlertTriangle, Store, Warehouse,
 } from "lucide-react";
 
 type NavChild = { href: string; label: string };
@@ -34,6 +34,7 @@ const nav: NavItem[] = [
   { href: "/dashboard/shipments",  label: "Shipments",       icon: Container },
   { href: "/dashboard/deliveries", label: "Deliveries & QC", icon: PackageCheck },
   { divider: true },
+  { href: "/dashboard/inventory",       label: "Inventory",       icon: Warehouse },
   { href: "/dashboard/product-library", label: "Product Library", icon: BookOpen },
   { href: "/dashboard/manufacturers", label: "Manufacturers", icon: Building2 },
   { href: "/dashboard/materials",  label: "Materials Library", icon: Layers },

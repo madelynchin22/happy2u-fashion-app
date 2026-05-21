@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import Link from "next/link";
-import { ClipboardList, ShoppingCart, Package, PackageCheck, AlertTriangle, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { format } from "date-fns";
 
 const CAT_COLORS: Record<string, string> = {
@@ -36,12 +36,10 @@ export default async function DashboardPage() {
   const oneWeek      = new Date(now.getTime() +  7 * 86400000);
   const twoWeeks     = new Date(now.getTime() + 14 * 86400000);
 
-  // ── Operational Pulse ───────────────────────────────────────────────────────
-  const [sampleCount, openPoCount, shipmentCount, pendingDeliveries, flaggedItems] = await Promise.all([
+  // ── Counts still needed elsewhere ───────────────────────────────────────────
+  const [sampleCount, openPoCount, flaggedItems] = await Promise.all([
     prisma.sampleOrder.count({ where: { status: { in: ["draft", "sent"] } } }),
     prisma.purchaseOrder.count({ where: { status: { notIn: ["closed", "shipped"] } } }),
-    prisma.shipment.count({ where: { status: { in: ["in_transit", "customs"] } } }),
-    prisma.delivery.count({ where: { status: "pending" } }),
     prisma.deliveryItem.count({ where: { isFlagged: true } }),
   ]);
 
@@ -67,29 +65,25 @@ export default async function DashboardPage() {
   const nextTwoWkPairs = inFlightPOs.filter(p => p.deliveryDate && new Date(p.deliveryDate) > oneWeek && new Date(p.deliveryDate) <= twoWeeks).reduce((s, p) => s + p.totalPairs, 0);
   const laterPairs     = inFlightPOs.filter(p => !p.deliveryDate || new Date(p.deliveryDate) > twoWeeks).reduce((s, p) => s + p.totalPairs, 0);
 
-  const [closedAgg, totalDeliveryItems] = await Promise.all([
-    prisma.purchaseOrder.aggregate({
-      where: { status: { in: ["shipped", "closed"] } },
-      _sum: { totalPairs: true }, _count: { id: true },
-    }),
-    prisma.deliveryItem.count(),
-  ]);
-  const receivedPairs = closedAgg._sum.totalPairs ?? 0;
-  const closedPoCount = closedAgg._count.id;
-  const qcPassRate    = totalDeliveryItems > 0
-    ? Math.round(((totalDeliveryItems - flaggedItems) / totalDeliveryItems) * 1000) / 10
-    : null;
-
-  const closedWithDates = await prisma.purchaseOrder.findMany({
-    where: { status: { in: ["closed", "shipped"] }, deliveryDate: { not: null } },
-    select: { date: true, deliveryDate: true },
+  // ── Supplier payments due ───────────────────────────────────────────────────
+  const PAYMENT_DAYS = 30;
+  const unpaidPOs = await prisma.purchaseOrder.findMany({
+    where: { status: { in: ["shipped", "closed"] }, paymentPaidDate: null, shipDate: { not: null } },
+    select: {
+      id: true, poNumber: true, productName: true, totalPrice: true, fxRate: true,
+      shipDate: true, paymentTerms: true,
+      manufacturer: { select: { name: true } },
+    },
+    orderBy: { shipDate: "asc" },
   });
-  const leadTimes = closedWithDates
-    .map(p => Math.ceil((new Date(p.deliveryDate!).getTime() - new Date(p.date).getTime()) / 86400000))
-    .filter(d => d > 0 && d < 365);
-  const avgLeadTime = leadTimes.length > 0
-    ? Math.round(leadTimes.reduce((s, d) => s + d, 0) / leadTimes.length)
-    : null;
+  const unpaidWithDue = unpaidPOs.map(p => {
+    const due = new Date(p.shipDate!);
+    due.setDate(due.getDate() + PAYMENT_DAYS);
+    const daysLeft = Math.ceil((due.getTime() - Date.now()) / 86400000);
+    const amountRm = Math.round((p.totalPrice ?? 0) * (p.fxRate ?? 0.62));
+    return { ...p, due, daysLeft, amountRm };
+  });
+  const totalOwed = unpaidWithDue.reduce((s, p) => s + p.amountRm, 0);
 
   // Category breakdown from ProductLibrary for this month's POs
   const sampleOrderNums = [...new Set(monthPOs.map(p => p.sampleOrderId).filter(Boolean))] as string[];
@@ -115,14 +109,19 @@ export default async function DashboardPage() {
     where: { status: { in: ["submitted", "sent", "in_production"] } },
     select: {
       id: true, poNumber: true, totalPairs: true, shipDate: true, deliveryDate: true,
-      productName: true, brand: true, status: true,
+      date: true, productName: true, brand: true, status: true,
       manufacturer: { select: { name: true } },
     },
     orderBy: [{ shipDate: "asc" }, { deliveryDate: "asc" }],
     take: 10,
   });
+  const getEstShip = (p: { shipDate: Date | null; deliveryDate: Date | null; date: Date }) => {
+    if (p.shipDate) return p.shipDate;
+    if (p.deliveryDate) return p.deliveryDate;
+    const d = new Date(p.date); d.setDate(d.getDate() + 50); return d;
+  };
   const shippingThisWeek = shipAlertPOs.filter(p => {
-    const days = daysFromNow(p.shipDate || p.deliveryDate);
+    const days = daysFromNow(getEstShip(p));
     return days !== null && days >= 0 && days <= 7;
   }).length;
 
@@ -157,7 +156,7 @@ export default async function DashboardPage() {
 
   // ── Action required ─────────────────────────────────────────────────────────
   const urgentShipPOs = shipAlertPOs.filter(p => {
-    const days = daysFromNow(p.shipDate || p.deliveryDate);
+    const days = daysFromNow(getEstShip(p));
     return days !== null && days >= 0 && days <= 3;
   });
   const [pendingLongSamples, marketTestsNeedVerdict] = await Promise.all([
@@ -167,7 +166,7 @@ export default async function DashboardPage() {
 
   const actionItems: { title: string; subtitle: string; href: string }[] = [];
   for (const p of urgentShipPOs) {
-    const days = daysFromNow(p.shipDate || p.deliveryDate);
+    const days = daysFromNow(getEstShip(p));
     actionItems.push({
       title: `${p.poNumber} ships${days !== null ? ` in ${days} day${days === 1 ? "" : "s"}` : " soon"}`,
       subtitle: `${p.manufacturer.name} · ${p.totalPairs} pairs · confirm with supplier`,
@@ -191,29 +190,6 @@ export default async function DashboardPage() {
           Welcome back, {session?.user?.name} · {dateStr}
         </p>
       </div>
-
-      {/* ── Operational Pulse ── */}
-      <section>
-        <p className="text-[10px] font-bold tracking-widest text-gray-400 uppercase mb-3">Operational Pulse</p>
-        <div className="grid grid-cols-5 gap-3">
-          {([
-            { label: "Active samples",       value: sampleCount,       Icon: ClipboardList, iconCls: "bg-blue-50 text-blue-500",    href: "/dashboard/samples" },
-            { label: "Open purchase orders", value: openPoCount,        Icon: ShoppingCart,  iconCls: "bg-violet-50 text-violet-500", href: "/dashboard/purchase-orders" },
-            { label: "Shipments in transit", value: shipmentCount,      Icon: Package,       iconCls: "bg-orange-50 text-orange-500", href: "/dashboard/shipments" },
-            { label: "Pending deliveries",   value: pendingDeliveries,  Icon: PackageCheck,  iconCls: "bg-green-50 text-green-500",  href: "/dashboard/shipments" },
-            { label: "Flagged QC issues",    value: flaggedItems,       Icon: AlertTriangle, iconCls: "bg-red-50 text-red-500",      href: "/dashboard/shipments" },
-          ] as const).map(c => (
-            <Link key={c.label} href={c.href}
-              className="bg-white border border-gray-200 rounded-2xl p-5 hover:shadow-sm transition-shadow">
-              <div className={`w-9 h-9 rounded-xl ${c.iconCls} flex items-center justify-center mb-4`}>
-                <c.Icon size={18} />
-              </div>
-              <p className="text-4xl font-bold text-gray-900">{c.value}</p>
-              <p className="text-xs text-gray-500 mt-2 leading-tight">{c.label}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
 
       {/* ── Procurement Pipeline ── */}
       <section>
@@ -278,28 +254,56 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          {/* Received & QC-passed */}
-          <div className="bg-white border border-gray-200 border-l-4 border-l-green-500 rounded-2xl p-5">
-            <p className="text-xs font-medium text-gray-500 mb-1">✓ Received &amp; QC-passed</p>
+          {/* Supplier payments due */}
+          <Link href="/dashboard/purchase-orders/payment-tracking"
+            className="bg-white border border-gray-200 border-l-4 border-l-red-400 rounded-2xl p-5 hover:shadow-sm transition-shadow block">
+            <p className="text-xs font-medium text-gray-500 mb-1">💳 Amount owed to suppliers</p>
             <div className="flex items-baseline gap-1.5 mb-0.5">
-              <span className="text-4xl font-bold text-gray-900">{receivedPairs.toLocaleString()}</span>
-              <span className="text-sm text-gray-500">pairs</span>
+              <span className="text-4xl font-bold text-gray-900">
+                RM {totalOwed > 0 ? Math.round(totalOwed).toLocaleString("en-MY") : "0"}
+              </span>
             </div>
             <p className="text-xs text-gray-400 mb-4">
-              From {closedPoCount} closed PO{closedPoCount !== 1 ? "s" : ""}
-              {flaggedItems > 0 ? ` · ${flaggedItems} defects flagged` : ""}
+              {unpaidWithDue.length} unpaid PO{unpaidWithDue.length !== 1 ? "s" : ""}
             </p>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">QC pass</span>
-                <span className="text-xs font-semibold text-gray-800">{qcPassRate !== null ? `${qcPassRate}%` : "—"}</span>
+            {unpaidWithDue.length === 0 ? (
+              <p className="text-xs text-green-600 font-medium">All payments settled ✓</p>
+            ) : (
+              <div className="space-y-2">
+                {unpaidWithDue.slice(0, 3).map(p => {
+                  const isUrgent  = p.daysLeft <= 7;
+                  const isOverdue = p.daysLeft < 0;
+                  return (
+                    <div key={p.id} className={`flex items-center justify-between rounded-lg px-2 py-1.5 -mx-2 ${
+                      isOverdue ? "bg-red-50" : isUrgent ? "bg-orange-50" : ""
+                    }`}>
+                      <div>
+                        <span className={`text-xs font-semibold ${isOverdue ? "text-red-700" : isUrgent ? "text-orange-700" : "text-gray-700"}`}>
+                          {p.poNumber}
+                        </span>
+                        <span className="text-xs text-gray-400 ml-1.5">{p.manufacturer.name}</span>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-xs font-semibold ${isOverdue ? "text-red-700" : isUrgent ? "text-orange-700" : "text-gray-700"}`}>
+                          RM {p.amountRm.toLocaleString("en-MY")}
+                        </p>
+                        <p className={`text-[10px] ${isOverdue ? "text-red-500 font-bold" : isUrgent ? "text-orange-500 font-semibold" : "text-gray-400"}`}>
+                          {isOverdue
+                            ? `${Math.abs(p.daysLeft)}d overdue ⚠`
+                            : isUrgent
+                            ? `due in ${p.daysLeft}d ⚠`
+                            : `due ${fmtShort(p.due)}`}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+                {unpaidWithDue.length > 3 && (
+                  <p className="text-xs text-gray-400 text-right">+{unpaidWithDue.length - 3} more</p>
+                )}
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">Avg lead time</span>
-                <span className="text-xs font-semibold text-gray-800">{avgLeadTime !== null ? `${avgLeadTime}d` : "—"}</span>
-              </div>
-            </div>
-          </div>
+            )}
+          </Link>
         </div>
       </section>
 
@@ -334,7 +338,7 @@ export default async function DashboardPage() {
             </thead>
             <tbody className="divide-y divide-amber-100">
               {shipAlertPOs.map(p => {
-                const refDate = p.shipDate || p.deliveryDate;
+                const refDate = getEstShip(p);
                 const days    = daysFromNow(refDate);
                 const isUrgent = days !== null && days <= 3;
                 const isSoon   = days !== null && days <= 7;

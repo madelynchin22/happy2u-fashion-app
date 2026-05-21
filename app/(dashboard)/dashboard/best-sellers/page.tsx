@@ -3,7 +3,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import Image from "next/image";
 import { ArrowUpRight, CheckCircle, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import Link from "next/link";
-import * as XLSX from "xlsx";
+
 
 type PLItem = {
   id: string;
@@ -182,7 +182,8 @@ export default function BestSellersPage() {
       .sort((a,b) => b.sold - a.sold).slice(0, 5);
   }, [list]);
 
-  function exportXLSX() {
+  async function exportXLSX() {
+    const XLSX = await import("xlsx");
     const data = ranked.map(r => ({
       Rank: r.rank, LibRef: r.libNumber, Product: r.productName,
       Category: r.category ?? "", Color: r.colorName ?? "", SKU: r.h2uSku ?? "",

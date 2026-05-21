@@ -11,15 +11,13 @@ Font.register({
 });
 
 // A3 landscape: 1190pt wide, padding 20+20=40 → 1150pt usable
-// Photo column: 90pt → data area: 1060pt
-// Data columns (fixed total 811pt, remark takes flex remainder ~249pt)
-
-const SIZES    = ["36","37","38","39","40","41","42"];
-const PHOTO_W  = 90;
+const SIZES      = ["36","37","38","39","40","41","42"];
+const PHOTO_W    = 115;   // increased from 90
+const REMARK_W   = 120;   // remarks+box design spanning column
 const EMPTY_ROWS = 5;
 
 const D = {
-  price: 32, // "$" column (unit price)
+  price: 32,
   sku:   60,
   main:  52,
   h2u:   60,
@@ -30,8 +28,7 @@ const D = {
   del:   52,
   sz:    20,  // ×7 = 140
   pairs: 28,
-  total: 42,
-  // remark: flex 1
+  // total: flex:1
 };
 
 const SZ_SPAN_W = D.sz * 7; // 140
@@ -64,29 +61,31 @@ const S = StyleSheet.create({
   // ── Main table ──
   table:      { border: "0.75pt solid #555", marginTop: 4 },
 
-  // Header row 1 (column labels)
   hRow1:      { flexDirection: "row", backgroundColor: "#f2f2f2", borderBottom: "0.5pt solid #aaa" },
-  // Header row 2 (size numbers)
   hRow2:      { flexDirection: "row", backgroundColor: "#e8e8e8", borderBottom: "0.5pt solid #aaa" },
   th:         { padding: "2 1.5", fontSize: 6, fontFamily: "NotoSansSC", fontWeight: "bold", borderRight: "0.5pt solid #bbb", color: "#222", textAlign: "center" },
   thPhotoBox: { width: PHOTO_W, borderRight: "0.5pt solid #bbb" },
 
-  // Product block (photo spans all rows via flex-row layout)
+  // Product block: photo | [rowsSec | remarkSpan | logoSpan]
   block:      { flexDirection: "row", borderBottom: "0.75pt solid #888" },
   photoCol:   { width: PHOTO_W, borderRight: "0.75pt solid #888", padding: "5 4", alignItems: "center" },
-  photoImg:   { width: 76, height: 68, objectFit: "contain" },
+  photoImg:   { width: 98, height: 90, objectFit: "contain" },
   photoSup:   { fontSize: 6.5, color: "#444", marginTop: 3, textAlign: "center" },
   photoRed:   { fontSize: 6.5, color: "#d03070", marginTop: 1, textAlign: "center" },
-  dataSec:    { flex: 1 },
 
-  // Data row
+  // Inner horizontal wrapper
+  innerRow:   { flex: 1, flexDirection: "row" },
+  rowsSec:    { flex: 1, flexDirection: "column" },
+
   tr:    { flexDirection: "row", borderBottom: "0.5pt solid #ddd" },
   td:    { padding: "2 1.5", fontSize: 7, borderRight: "0.5pt solid #ddd" },
-  tdR:   { padding: "2 1.5", fontSize: 7 }, // last cell (no right border)
 
-  // Empty row
   eRow:  { flexDirection: "row", height: 12, borderBottom: "0.5pt solid #ddd" },
   eCell: { borderRight: "0.5pt solid #ddd" },
+
+  // Spanning columns
+  remarkSpan: { width: REMARK_W, borderLeft: "0.75pt solid #888", padding: "3 4", flexDirection: "column" },
+  logoSpan:   { width: D.logo,   borderLeft: "0.75pt solid #888", padding: "2 2", flexDirection: "column", alignItems: "center" },
 
   footer: { position: "absolute", bottom: 12, left: 20, right: 20, flexDirection: "row", justifyContent: "space-between", fontSize: 6.5, color: "#aaa", borderTop: "0.5pt solid #e5e7eb", paddingTop: 3 },
 });
@@ -101,14 +100,13 @@ export function GroupPurchaseOrderPDF({ pos, groupCode, supplier }: { pos: any[]
     <Document>
       <Page size="A3" orientation="landscape" style={S.page}>
 
-        {/* ── Page header: title (center) + PO info box (right) ── */}
+        {/* ── Page header ── */}
         <View style={S.pageHeader}>
           <View style={S.titleArea}>
             <Text style={S.titleText}>PURCHASE ORDER</Text>
           </View>
 
           <View style={S.metaOuter}>
-            {/* PO info bordered box */}
             <View style={S.metaBox}>
               <View style={S.metaRow}>
                 <Text style={S.metaLabel}>PO NO:</Text>
@@ -128,7 +126,6 @@ export function GroupPurchaseOrderPDF({ pos, groupCode, supplier }: { pos: any[]
               </View>
             </View>
 
-            {/* Total / Paid / Pending */}
             <View style={S.pendingBox}>
               <View style={S.pRow}>
                 <Text style={S.pLabel}>Total</Text>
@@ -151,7 +148,7 @@ export function GroupPurchaseOrderPDF({ pos, groupCode, supplier }: { pos: any[]
         {/* ── Main table ── */}
         <View style={S.table}>
 
-          {/* Header row 1: column names (bilingual) */}
+          {/* Header row 1 */}
           <View style={S.hRow1}>
             <View style={S.thPhotoBox} />
             <Text style={[S.th, { width: D.price }]}>$</Text>
@@ -165,54 +162,48 @@ export function GroupPurchaseOrderPDF({ pos, groupCode, supplier }: { pos: any[]
             <Text style={[S.th, { width: D.mat }]}>{"中底\nMidsole"}</Text>
             <Text style={[S.th, { width: D.mat }]}>{"大底\nOutsole"}</Text>
             <Text style={[S.th, { width: D.mat }]}>{"五金\nMetal Buckle"}</Text>
-            <Text style={[S.th, { flex: 1 }]}>{"备注\nRemarks"}</Text>
-            <Text style={[S.th, { width: D.logo }]}>LOGO</Text>
             <Text style={[S.th, { width: D.del }]}>{"交货日期\nDelivery Date"}</Text>
             <Text style={[S.th, { width: SZ_SPAN_W }]}>尺码/SIZE</Text>
             <Text style={[S.th, { width: D.pairs }]}>{"双数\nPairs"}</Text>
-            <Text style={[S.th, { width: D.total, borderRight: 0 }]}>{"总价\nTotal"}</Text>
+            <Text style={[S.th, { flex: 1 }]}>{"总价\nTotal"}</Text>
+            <Text style={[S.th, { width: REMARK_W }]}>{"备注\nRemarks"}</Text>
+            <Text style={[S.th, { width: D.logo, borderRight: 0 }]}>LOGO</Text>
           </View>
 
           {/* Header row 2: individual size numbers */}
           <View style={S.hRow2}>
             <View style={S.thPhotoBox} />
-            {/* Blank cells maintaining column borders */}
-            <View style={{ width: D.price, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.sku, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.main, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.h2u, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.color, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.code, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.mat, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.mat, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.mat, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.mat, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.mat, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ flex: 1, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.logo, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.del, borderRight: "0.5pt solid #bbb" }} />
-            {/* Size numbers */}
+            <View style={{ width: D.price,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.sku,      borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.main,     borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.h2u,      borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.color,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.code,     borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,      borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,      borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,      borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,      borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.mat,      borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.del,      borderRight: "0.5pt solid #bbb" }} />
             {SIZES.map(s => <Text key={s} style={[S.th, { width: D.sz }]}>{s}</Text>)}
-            <View style={{ width: D.pairs, borderRight: "0.5pt solid #bbb" }} />
-            <View style={{ width: D.total }} />
+            <View style={{ width: D.pairs,    borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ flex: 1,           borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: REMARK_W,   borderRight: "0.5pt solid #bbb" }} />
+            <View style={{ width: D.logo }} />
           </View>
 
-          {/* ── Product blocks: one block per supplierSku group (matches Excel layout) ── */}
+          {/* ── Product blocks ── */}
           {pos.flatMap((po: any) => {
             const isMulti    = pos.length > 1;
             const poSupplier = po.manufacturer?.name ?? supplier;
 
-            // Group items by model: use h2uSku prefix (strip trailing color-code letters)
-            // because supplierSku is only set on the first colour row; others have null or the manufacturer name
             const groups: { supplierSku: string; items: any[] }[] = [];
             for (const item of po.items ?? []) {
-              // "S1625-2H" → "S1625-2",  "S1727BR" → "S1727",  "S1701RG" → "S1701"
               const modelKey = item.h2uSku?.replace(/[A-Z]+$/, "") || item.supplierSku || "";
               const last = groups[groups.length - 1];
               if (last && last.supplierSku === modelKey) {
                 last.items.push(item);
               } else {
-                // Display the real supplier SKU when the first item has one; fall back to derived key
                 const displaySku = (item.supplierSku && /^[A-Z]\d/.test(item.supplierSku))
                   ? item.supplierSku
                   : modelKey;
@@ -222,7 +213,6 @@ export function GroupPurchaseOrderPDF({ pos, groupCode, supplier }: { pos: any[]
 
             const blocks: React.ReactNode[] = [];
 
-            // PO separator header when printing multiple POs together
             if (isMulti) {
               const poTotal = (po.items ?? []).reduce((s: number, i: any) => s + (i.totalPairs ?? 0), 0);
               blocks.push(
@@ -235,13 +225,9 @@ export function GroupPurchaseOrderPDF({ pos, groupCode, supplier }: { pos: any[]
               );
             }
 
-            // One block per supplierSku group
             groups.forEach((grp, gIdx) => {
-              const photo         = grp.items[0]?.photoUrl ?? po.photoUrl ?? null;
-              const deliveryDate  = grp.items[0]?.deliveryDate ?? po.deliveryDate;
-              const deliveryLabel = deliveryDate
-                ? new Date(deliveryDate).toLocaleDateString("en-MY", { month: "short", year: "2-digit" }).toUpperCase()
-                : "";
+              const photo      = grp.items[0]?.photoUrl ?? po.photoUrl ?? null;
+              const firstItem  = grp.items[0];
 
               blocks.push(
                 <View key={`${po.id}-${gIdx}`} style={S.block} wrap={false}>
@@ -252,92 +238,95 @@ export function GroupPurchaseOrderPDF({ pos, groupCode, supplier }: { pos: any[]
                       ? <Image src={photo} style={S.photoImg} />
                       : <View style={[S.photoImg, { backgroundColor: "#f3f4f6" }]} />}
                     <Text style={S.photoSup}>{poSupplier}</Text>
-                    {deliveryLabel ? <Text style={S.photoRed}>{deliveryLabel}</Text> : null}
                   </View>
 
-                  {/* Data section */}
-                  <View style={S.dataSec}>
+                  {/* Inner: [per-color rows | remarks+box | logo] */}
+                  <View style={S.innerRow}>
 
-                    {/* Colour variant rows */}
-                    {grp.items.map((item: any, i: number) => (
-                      <View key={item.id} style={S.tr}>
-                        <Text style={[S.td, { width: D.price, textAlign: "right" }]}>
-                          {i === 0 && item.discountPrice ? `¥${item.discountPrice}` : ""}
-                        </Text>
-                        <Text style={[S.td, { width: D.sku }]}>
-                          {i === 0 ? (item.supplierSku || "") : ""}
-                        </Text>
-                        <Text style={[S.td, { width: D.main, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
-                          {i === 0 ? grp.supplierSku : ""}
-                        </Text>
-                        <Text style={[S.td, { width: D.h2u, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
-                          {item.h2uSku || ""}
-                        </Text>
-                        <Text style={[S.td, { width: D.color }]}>{item.colorName || ""}</Text>
-                        <Text style={[S.td, { width: D.code }]}>{item.colorCode || ""}</Text>
-                        {/* Material specs — shown only on first colour of each model group */}
-                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialUpper   || "") : ""}</Text>
-                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialLining  || "") : ""}</Text>
-                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialMidsole || "") : ""}</Text>
-                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialOutsole || "") : ""}</Text>
-                        <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.hardware        || "") : ""}</Text>
+                    {/* Left: per-color data rows + empty filler rows */}
+                    <View style={S.rowsSec}>
 
-                        {/* REMARK: text + shoe box design image */}
-                        <View style={[S.td, { flex: 1, flexDirection: "column" }]}>
-                          {i === 0 && item.remark ? <Text>{item.remark}</Text> : null}
-                          {i === 0 && item.boxDesignUri ? (
-                            <Image src={item.boxDesignUri} style={{ width: "100%", height: 64, objectFit: "contain", marginTop: 2 }} />
-                          ) : null}
-                        </View>
-
-                        {/* LOGO: logo design image + spec text */}
-                        <View style={[S.td, { width: D.logo, flexDirection: "column", alignItems: "center" }]}>
-                          {i === 0 && item.logoDesignUri ? (
-                            <Image src={item.logoDesignUri} style={{ width: D.logo - 4, height: 52, objectFit: "contain" }} />
-                          ) : null}
-                          {i === 0 && item.logoSpec ? <Text style={{ marginTop: 1 }}>{item.logoSpec}</Text> : null}
-                        </View>
-                        <Text style={[S.td, { width: D.del }]}>
-                          {i === 0 && item.deliveryDate
-                            ? new Date(item.deliveryDate).toLocaleDateString("en-MY", { month: "short", year: "2-digit" }).toUpperCase()
-                            : ""}
-                        </Text>
-                        {SIZES.map(s => (
-                          <Text key={s} style={[S.td, { width: D.sz, textAlign: "center" }]}>
-                            {(item as any)[`qty${s}`] || ""}
+                      {grp.items.map((item: any, i: number) => (
+                        <View key={item.id} style={S.tr}>
+                          <Text style={[S.td, { width: D.price, textAlign: "right" }]}>
+                            {i === 0 && item.discountPrice ? `¥${item.discountPrice}` : ""}
                           </Text>
-                        ))}
-                        <Text style={[S.td, { width: D.pairs, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
-                          {item.totalPairs || ""}
-                        </Text>
-                        <Text style={[S.tdR, { width: D.total, textAlign: "right", fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" }]}>
-                          {item.lineTotal ? `¥${Math.round(item.lineTotal)}` : ""}
-                        </Text>
-                      </View>
-                    ))}
+                          <Text style={[S.td, { width: D.sku }]}>
+                            {i === 0 ? (item.supplierSku || "") : ""}
+                          </Text>
+                          <Text style={[S.td, { width: D.main, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
+                            {i === 0 ? grp.supplierSku : ""}
+                          </Text>
+                          <Text style={[S.td, { width: D.h2u, fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
+                            {item.h2uSku || ""}
+                          </Text>
+                          <Text style={[S.td, { width: D.color }]}>{item.colorName || ""}</Text>
+                          <Text style={[S.td, { width: D.code }]}>{item.colorCode || ""}</Text>
+                          <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialUpper   || "") : ""}</Text>
+                          <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialLining  || "") : ""}</Text>
+                          <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialMidsole || "") : ""}</Text>
+                          <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.materialOutsole || "") : ""}</Text>
+                          <Text style={[S.td, { width: D.mat }]}>{i === 0 ? (item.hardware        || "") : ""}</Text>
+                          <Text style={[S.td, { width: D.del }]}>
+                            {i === 0 && item.deliveryDate
+                              ? new Date(item.deliveryDate).toLocaleDateString("en-MY", { month: "short", year: "2-digit" }).toUpperCase()
+                              : ""}
+                          </Text>
+                          {SIZES.map(s => (
+                            <Text key={s} style={[S.td, { width: D.sz, textAlign: "center" }]}>
+                              {(item as any)[`qty${s}`] || ""}
+                            </Text>
+                          ))}
+                          <Text style={[S.td, { width: D.pairs, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>
+                            {item.totalPairs || ""}
+                          </Text>
+                          <Text style={[S.td, { flex: 1, textAlign: "right", fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070", borderRight: 0 }]}>
+                            {item.lineTotal ? `¥${Math.round(item.lineTotal)}` : ""}
+                          </Text>
+                        </View>
+                      ))}
 
-                    {/* Empty filler rows for handwriting */}
-                    {Array.from({ length: EMPTY_ROWS }).map((_, ei) => (
-                      <View key={`e${ei}`} style={S.eRow}>
-                        <View style={[S.eCell, { width: D.price }]} />
-                        <View style={[S.eCell, { width: D.sku }]} />
-                        <View style={[S.eCell, { width: D.main }]} />
-                        <View style={[S.eCell, { width: D.h2u }]} />
-                        <View style={[S.eCell, { width: D.color }]} />
-                        <View style={[S.eCell, { width: D.code }]} />
-                        <View style={[S.eCell, { width: D.mat }]} />
-                        <View style={[S.eCell, { width: D.mat }]} />
-                        <View style={[S.eCell, { width: D.mat }]} />
-                        <View style={[S.eCell, { width: D.mat }]} />
-                        <View style={[S.eCell, { width: D.mat }]} />
-                        <View style={[S.eCell, { flex: 1 }]} />
-                        <View style={[S.eCell, { width: D.logo }]} />
-                        <View style={[S.eCell, { width: D.del }]} />
-                        {SIZES.map(s => <View key={s} style={[S.eCell, { width: D.sz }]} />)}
-                        <View style={[S.eCell, { width: D.pairs }]} />
-                        <View style={{ width: D.total }} />
-                      </View>
-                    ))}
+                      {/* Empty filler rows */}
+                      {Array.from({ length: EMPTY_ROWS }).map((_, ei) => (
+                        <View key={`e${ei}`} style={S.eRow}>
+                          <View style={[S.eCell, { width: D.price }]} />
+                          <View style={[S.eCell, { width: D.sku }]} />
+                          <View style={[S.eCell, { width: D.main }]} />
+                          <View style={[S.eCell, { width: D.h2u }]} />
+                          <View style={[S.eCell, { width: D.color }]} />
+                          <View style={[S.eCell, { width: D.code }]} />
+                          <View style={[S.eCell, { width: D.mat }]} />
+                          <View style={[S.eCell, { width: D.mat }]} />
+                          <View style={[S.eCell, { width: D.mat }]} />
+                          <View style={[S.eCell, { width: D.mat }]} />
+                          <View style={[S.eCell, { width: D.mat }]} />
+                          <View style={[S.eCell, { width: D.del }]} />
+                          {SIZES.map(s => <View key={s} style={[S.eCell, { width: D.sz }]} />)}
+                          <View style={[S.eCell, { width: D.pairs }]} />
+                          <View style={{ flex: 1 }} />
+                        </View>
+                      ))}
+
+                    </View>
+
+                    {/* Remarks + box design — spans ALL colour rows and empty rows */}
+                    <View style={S.remarkSpan}>
+                      {firstItem?.remark ? <Text style={{ fontSize: 7 }}>{firstItem.remark}</Text> : null}
+                      {firstItem?.boxDesignUri ? (
+                        <Image
+                          src={firstItem.boxDesignUri}
+                          style={{ width: REMARK_W - 8, flex: 1, objectFit: "contain", marginTop: 2 }}
+                        />
+                      ) : null}
+                    </View>
+
+                    {/* LOGO — spans ALL colour rows and empty rows */}
+                    <View style={S.logoSpan}>
+                      {firstItem?.logoDesignUri ? (
+                        <Image src={firstItem.logoDesignUri} style={{ width: D.logo - 4, height: 52, objectFit: "contain" }} />
+                      ) : null}
+                      {firstItem?.logoSpec ? <Text style={{ marginTop: 1, fontSize: 7 }}>{firstItem.logoSpec}</Text> : null}
+                    </View>
 
                   </View>
                 </View>

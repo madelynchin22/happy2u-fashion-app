@@ -10,7 +10,13 @@ export async function GET() {
   const deliveries = await prisma.delivery.findMany({
     include: {
       outlet: { select: { id: true, name: true, marking: true } },
-      shipment: { select: { shipmentNumber: true, containerNumber: true } },
+      shipment: {
+        select: {
+          shipmentNumber: true,
+          containerNumber: true,
+          items: { include: { po: { select: { id: true, poNumber: true, productName: true } } } },
+        },
+      },
       items: true,
     },
     orderBy: { createdAt: "desc" },

@@ -8,10 +8,16 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const pos = await prisma.purchaseOrder.findMany({
-    where: { status: "shipped" },
+    where: {
+      shipDate: { not: null },
+      status: { notIn: ["draft", "closed"] },
+    },
     include: {
       manufacturer: { select: { id: true, name: true } },
-      items: { orderBy: { id: "asc" } },
+      items: {
+        where: { itemShipDate: { not: null } }, // only shipped items
+        orderBy: { id: "asc" },
+      },
       outletDeliveries: {
         include: { outlet: true, receiptItems: true },
         orderBy: { createdAt: "asc" },
@@ -20,5 +26,21 @@ export async function GET() {
     orderBy: { shipDate: "desc" },
   });
 
-  return NextResponse.json(pos);
+  // Filter each PO's outletDeliveries to only outlets that are receiving the shipped items
+  const result = pos.map(po => {
+    const shippedOutletIds = new Set<string>();
+    for (const item of po.items) {
+      if (!item.outletAllocations) continue;
+      try {
+        const allocs: { outletId: string }[] = JSON.parse(item.outletAllocations);
+        for (const a of allocs) { if (a.outletId) shippedOutletIds.add(a.outletId); }
+      } catch {}
+    }
+    return {
+      ...po,
+      outletDeliveries: po.outletDeliveries.filter(d => shippedOutletIds.has(d.outletId)),
+    };
+  }).filter(po => po.outletDeliveries.length > 0); // hide POs with no relevant outlets
+
+  return NextResponse.json(result);
 }

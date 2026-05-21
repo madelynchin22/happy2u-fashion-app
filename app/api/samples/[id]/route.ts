@@ -15,11 +15,24 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
       collection: true,
       parent: { select: { id: true, orderNumber: true, version: true } },
       children: { select: { id: true, orderNumber: true, version: true, status: true } },
-      productLibraries: { select: { id: true, mainSku: true, productName: true, status: true }, take: 1 },
+      productLibraries: { select: { id: true, mainSku: true, productName: true, status: true, colorName: true, colorCode: true }, take: 1 },
     },
   });
   if (!sample) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(sample);
+
+  // When a Main SKU exists, fetch all sibling ProductLibrary colours as source of truth
+  let libColours: { colorName: string | null; colorCode: string | null }[] | null = null;
+  const mainSku = sample.productLibraries[0]?.mainSku;
+  if (mainSku) {
+    const siblings = await prisma.productLibrary.findMany({
+      where: { mainSku },
+      select: { colorName: true, colorCode: true },
+      orderBy: { createdAt: "asc" },
+    });
+    libColours = siblings.map(s => ({ colorName: s.colorName, colorCode: s.colorCode }));
+  }
+
+  return NextResponse.json({ ...sample, libColours });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

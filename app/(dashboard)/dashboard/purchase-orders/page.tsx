@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { Plus, ChevronRight, X, AlertTriangle, Download, Edit2, Camera, Trash2 } from "lucide-react";
+import { POTabs } from "@/components/layout/POTabs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ type Outlet = { id: string; name: string; marking: string; country: string; isHQ
 type PO = {
   id: string; poNumber: string; brand: string; productName?: string; libProductName?: string;
   status: string; poType?: string; photoUrl?: string;
+  items?: { photoUrl?: string | null; h2uSku?: string | null; colorName?: string | null }[];
   sampleOrderId?: string; parentPoNumber?: string;
   destination?: string; paymentTerms?: string; paymentIncoterm?: string;
   fxRate?: number; totalPairs: number; totalPrice: number; currency: string;
@@ -38,18 +40,20 @@ type OutletDelivery = {
   }[];
 };
 
-type PODetail = PO & {
+type PODetail = Omit<PO, "items"> & {
   items: {
-    id: string; colorName?: string; colorCode?: string; supplierSku?: string; h2uSku?: string;
+    id: string; colorName?: string; colorCode?: string; supplierSku?: string; h2uSku?: string; photoUrl?: string | null;
     qty35: number; qty36: number; qty37: number; qty38: number;
     qty39: number; qty40: number; qty41: number; qty42: number;
     totalPairs: number; discountPrice?: number; lineTotal?: number;
     outletAllocations?: string | null;
+    itemShipDate?: string | null;
     receivedQty?: number | null; defectQty?: number | null;
     receiptNotes?: string | null; receiptDate?: string | null;
   }[];
   createdBy?: { name?: string };
   sampleColorVariants?: string | null;
+  libColorVariants?: string | null;
   libProductName?: string | null;
   outletDeliveries?: OutletDelivery[];
 };
@@ -141,7 +145,10 @@ function SummaryCards({ pos, activeFilter, onFilter }: {
   activeFilter: string;
   onFilter: (key: string) => void;
 }) {
-  const committed   = totalCommittedRm(pos);
+  const [showRmb, setShowRmb] = React.useState(false);
+
+  const committed    = totalCommittedRm(pos);
+  const committedRmb = pos.filter(p => p.status !== "draft").reduce((s, p) => s + p.totalPrice, 0);
   const activePOs   = pos.filter(p => !["draft", "closed"].includes(p.status)).length;
   const inProdPos   = pos.filter(p => ["submitted", "in_production"].includes(p.status));
   const inProd      = inProdPos.length;
@@ -160,11 +167,13 @@ function SummaryCards({ pos, activeFilter, onFilter }: {
     {
       filterKey: "all",
       label: "Total committed",
-      value: `RM ${Math.round(committed).toLocaleString()}`,
+      value: showRmb ? `¥${Math.round(committedRmb).toLocaleString()}` : `RM ${Math.round(committed).toLocaleString()}`,
       sub: `${activePOs} active POs`,
+      hint: `tap to show ${showRmb ? "RM" : "¥RMB"}`,
       borderCls: "border-l-4 border-l-brand-500 border-gray-200",
       valueCls: "text-gray-900 text-2xl",
       activeCls: "ring-2 ring-brand-300 border-l-4 border-l-brand-500",
+      onClickOverride: () => setShowRmb(v => !v),
     },
     {
       filterKey: "in_production",
@@ -209,18 +218,22 @@ function SummaryCards({ pos, activeFilter, onFilter }: {
       {cards.map(c => {
         const isActive = activeFilter === c.filterKey;
         const clickable = !["avgLead"].includes(c.filterKey);
+        const handleClick = (c as any).onClickOverride
+          ? (c as any).onClickOverride
+          : () => clickable && onFilter(isActive ? "all" : c.filterKey);
         return (
           <button
             key={c.filterKey}
-            disabled={!clickable}
-            onClick={() => clickable && onFilter(isActive ? "all" : c.filterKey)}
+            disabled={!clickable && !(c as any).onClickOverride}
+            onClick={handleClick}
             className={`text-left bg-white border rounded-xl px-4 py-4 transition-all focus:outline-none ${
-              isActive ? c.activeCls : `${c.borderCls} ${clickable ? "hover:shadow-sm hover:border-gray-300 cursor-pointer" : "cursor-default"}`
+              isActive ? c.activeCls : `${c.borderCls} ${(clickable || (c as any).onClickOverride) ? "hover:shadow-sm hover:border-gray-300 cursor-pointer" : "cursor-default"}`
             }`}
           >
             <p className="text-xs font-medium text-gray-500 mb-2">{c.label}</p>
             <p className={`font-bold leading-none mb-1 ${c.valueCls}`}>{c.value}</p>
             <p className="text-xs text-gray-400 mt-1">{c.sub}</p>
+            {(c as any).hint && <p className="text-xs text-gray-300 mt-0.5">{(c as any).hint}</p>}
           </button>
         );
       })}
@@ -240,268 +253,181 @@ function fmtDate(d: Date): string {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit" });
 }
 
-function Timeline({ po, onSave }: { po: PODetail; onSave?: (field: "shipDate" | "deliveryDate", value: string) => void }) {
-  const poSentDate     = po.date        ? new Date(po.date)        : null;
-  const shipOutActual  = po.shipDate    ? new Date(po.shipDate)    : null;
-  const arriveActual   = po.deliveryDate ? new Date(po.deliveryDate) : null;
+const MAIN_SKU_RE_TL = /^(S\d{4})/i;
 
-  // Estimated dates derived from PO sent
-  const estShipOut = poSentDate ? addDays(poSentDate, 45) : null;
-  const estArrive  = estShipOut ? addDays(estShipOut,  25) : null;
+function Timeline({ po, onSave, onItemShipSave }: {
+  po: PODetail;
+  onSave?: (field: "shipDate" | "deliveryDate", value: string) => void;
+  onItemShipSave?: (itemIds: string[], date: string | null) => Promise<void>;
+}) {
+  const [localDates, setLocalDates] = React.useState<Record<string, string>>({});
+  const [saving, setSaving] = React.useState<Record<string, boolean>>({});
 
-  const now = new Date();
+  const now          = new Date();
+  const poSentDate   = po.date         ? new Date(po.date)         : null;
+  const arriveActual = po.deliveryDate ? new Date(po.deliveryDate) : null;
+  const estArrive    = poSentDate      ? addDays(poSentDate, 70)   : null;
 
-  function nodeState(actual: Date | null, est: Date | null): "done" | "active" | "future" {
-    const ref = actual ?? est;
-    if (!ref) return "future";
-    const diff = (ref.getTime() - now.getTime()) / 86400000;
-    if (diff < -1) return "done";
-    if (diff <= 1) return "active";
-    return "future";
+  type SkuItem = PODetail["items"][0];
+  type SkuGroup = { key: string; photoUrl?: string | null; colorName?: string | null; pairs: number; items: SkuItem[] };
+
+  // Group items by main SKU, one row per unique shoe model
+  const skuMap = new Map<string, SkuGroup>();
+  for (const item of po.items) {
+    const key = item.h2uSku?.match(MAIN_SKU_RE_TL)?.[1]?.toUpperCase() ?? item.h2uSku ?? item.id;
+    if (!skuMap.has(key)) skuMap.set(key, { key, photoUrl: item.photoUrl, colorName: item.colorName, pairs: 0, items: [] });
+    const grp = skuMap.get(key)!;
+    grp.pairs += item.totalPairs;
+    grp.items.push(item);
   }
+  const skuGroups = [...skuMap.values()];
 
-  const steps: { key: string; label: string; note: string; actual: Date | null; est: Date | null; field?: "shipDate" | "deliveryDate" }[] = [
-    {
-      key:    "po_sent",
-      label:  "PO sent",
-      note:   "Submit order date",
-      actual: poSentDate,
-      est:    null,
-    },
-    {
-      key:    "ship_out",
-      label:  "Supplier ship out",
-      note:   "+45 days from PO sent",
-      actual: shipOutActual,
-      est:    estShipOut,
-      field:  "shipDate",
-    },
-    {
-      key:    "arrive",
-      label:  "Arrive at destination",
-      note:   "Warehouse + ship ≈ 25 days",
-      actual: arriveActual,
-      est:    estArrive,
-      field:  "deliveryDate",
-    },
-  ];
+  // Effective date for a single item: local optimistic first, then saved DB value
+  const itemDate = (item: SkuItem): string =>
+    localDates[item.id] !== undefined
+      ? localDates[item.id]
+      : item.itemShipDate ? (item.itemShipDate as string).slice(0, 10) : "";
 
-  const doneCount   = steps.filter(s => nodeState(s.actual, s.est) === "done").length;
-  const progressPct = steps.length > 1 ? Math.round((doneCount / (steps.length - 1)) * 100) : 0;
+  // A group counts as "shipped" once at least one colour variant has a date
+  const totalGroups   = skuGroups.length;
+  const shippedGroups = skuGroups.filter(g => g.items.some(i => itemDate(i) !== "")).length;
+  const allShipped    = totalGroups > 0 && shippedGroups === totalGroups;
 
-  const refArrive    = arriveActual ?? estArrive;
-  const daysToArrive = refArrive
-    ? Math.ceil((refArrive.getTime() - now.getTime()) / 86400000)
+  const daysToArrive = (arriveActual ?? estArrive)
+    ? Math.ceil(((arriveActual ?? estArrive)!.getTime() - now.getTime()) / 86400000)
     : null;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-gray-900">Production timeline</p>
         {daysToArrive !== null && (
           <p className={`text-xs font-medium ${daysToArrive < 0 ? "text-red-500" : "text-gray-400"}`}>
-            {daysToArrive > 0
-              ? `Est. arrival in ${daysToArrive} days`
-              : `${Math.abs(daysToArrive)} days overdue`}
+            {daysToArrive > 0 ? `Est. arrival in ${daysToArrive} days` : `${Math.abs(daysToArrive)} days overdue`}
           </p>
         )}
       </div>
 
-      {/* Dot track */}
-      <div className="relative flex items-center justify-between mb-3">
-        <div className="absolute top-3 left-0 right-0 h-0.5 bg-gray-200" />
-        <div
-          className="absolute top-3 left-0 h-0.5 bg-green-500 transition-all"
-          style={{ width: `${progressPct}%` }}
-        />
-        {steps.map(s => {
-          const state = nodeState(s.actual, s.est);
-          return (
-            <div key={s.key} className="relative z-10">
-              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-                state === "done"   ? "bg-green-500 border-green-500" :
-                state === "active" ? "bg-white border-green-500" :
-                                     "bg-white border-gray-300"
-              }`}>
-                {state === "done" && (
-                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 12 12">
-                    <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                )}
-                {state === "active" && <div className="w-2 h-2 rounded-full bg-green-500" />}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Labels + dates */}
-      <div className="flex items-start justify-between">
-        {steps.map((s, i) => {
-          const state = nodeState(s.actual, s.est);
-          const align = i === 0
-            ? "items-start text-left"
-            : i === steps.length - 1
-              ? "items-end text-right"
-              : "items-center text-center";
-          return (
-            <div key={s.key} className={`flex flex-col ${align}`} style={{ width: "33%" }}>
-              <p className={`text-xs font-semibold leading-tight ${
-                state === "active" ? "text-green-600" : "text-gray-700"
-              }`}>
-                {s.label}
-              </p>
-              {/* Actual date — editable input for ship_out and arrive */}
-              {s.field && onSave ? (
-                <input
-                  type="date"
-                  className="mt-1 text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 focus:outline-none focus:border-brand-400 w-full max-w-[120px]"
-                  defaultValue={s.actual ? s.actual.toISOString().split("T")[0] : ""}
-                  onBlur={e => { if (e.target.value) onSave(s.field!, e.target.value); }}
-                  onChange={e => { if (e.target.value) onSave(s.field!, e.target.value); }}
-                />
-              ) : (
-                <p className={`text-xs font-medium mt-1 ${
-                  state === "done" ? "text-gray-500" :
-                  state === "active" ? "text-green-600" : "text-gray-400"
+      {/* Overall 4-stage bar */}
+      <div>
+        <div className="flex items-center gap-2 mb-1.5">
+          {[
+            { label: "PO submitted", done: !!poSentDate, date: poSentDate ? fmtDate(poSentDate) : null },
+            { label: `${shippedGroups}/${totalGroups} SKUs shipped`, done: shippedGroups > 0, date: null },
+            { label: "All shipped", done: allShipped, date: null },
+            { label: "Arrived", done: !!arriveActual, date: arriveActual ? fmtDate(arriveActual) : (estArrive ? `Est. ${fmtDate(estArrive)}` : null) },
+          ].map((stage, i, arr) => (
+            <React.Fragment key={i}>
+              <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                  stage.done ? "bg-green-500 border-green-500" : "bg-white border-gray-300"
                 }`}>
-                  {s.actual ? fmtDate(s.actual) : "—"}
-                </p>
-              )}
-              {/* Estimated date */}
-              {s.est && (
-                <p className="text-[11px] text-violet-500 mt-0.5">
-                  Est. {fmtDate(s.est)}
-                </p>
-              )}
-              <p className="text-[10px] text-gray-300 mt-1 leading-tight">{s.note}</p>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function GoodsReceipt({ po, onSaved }: { po: PODetail; onSaved: () => void }) {
-  const [saving, setSaving] = useState(false);
-
-  const deliveries = po.outletDeliveries ?? [];
-
-  // Build per-outlet summary rows
-  const outletRows = deliveries.map(d => {
-    const allocatedItems = po.items.filter(item => {
-      if (!item.outletAllocations) return false;
-      try {
-        const allocs: { outletId: string }[] = JSON.parse(item.outletAllocations);
-        return allocs.some(a => a.outletId === d.outletId);
-      } catch { return false; }
-    });
-
-    const colours = allocatedItems.map(item => {
-      const allocs: any[] = (() => { try { return JSON.parse(item.outletAllocations ?? "[]"); } catch { return []; } })();
-      const alloc = allocs.find((a: any) => a.outletId === d.outletId);
-      const ordered = alloc
-        ? [36,37,38,39,40,41,42].reduce((s: number, sz: number) => s + ((alloc as any)[`qty${sz}`] || 0), 0)
-        : 0;
-      const ri = d.receiptItems.find(r => r.colorName === item.colorName);
-      return { colorName: item.colorName ?? "—", ordered, received: ri?.receivedQty ?? null, defect: ri?.defectQty ?? null };
-    });
-
-    const totalOrdered  = colours.reduce((s, c) => s + c.ordered, 0);
-    const totalReceived = colours.reduce((s, c) => s + (c.received ?? 0), 0);
-    const totalDefect   = colours.reduce((s, c) => s + (c.defect   ?? 0), 0);
-    const allReceived   = colours.length > 0 && colours.every(c => c.received != null);
-
-    let rowStyle    = "bg-amber-50 border-amber-200";
-    let dotStyle    = "bg-amber-400";
-    let statusLabel = "Not yet arrived";
-    if (d.status === "receipt_done" || allReceived) {
-      if (totalDefect > 0) {
-        rowStyle = "bg-red-50 border-red-200"; dotStyle = "bg-red-500";
-        statusLabel = `${totalDefect} defect${totalDefect > 1 ? "s" : ""}`;
-      } else if (totalReceived >= totalOrdered && totalOrdered > 0) {
-        rowStyle = "bg-green-50 border-green-200"; dotStyle = "bg-green-500";
-        statusLabel = "All correct";
-      } else {
-        statusLabel = "Partial";
-      }
-    }
-
-    return { d, colours, totalOrdered, totalReceived, totalDefect, rowStyle, dotStyle, statusLabel };
-  });
-
-  async function closePO() {
-    setSaving(true);
-    await fetch(`/api/purchase-orders/${po.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "closed" }),
-    });
-    setSaving(false);
-    onSaved();
-  }
-
-  return (
-    <div className="border border-gray-100 rounded-xl p-5 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <span className="text-base">📋</span> Main Goods Receipt Record
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5">Delivery status per outlet — green: correct · red: defects · yellow: not yet arrived</p>
-        </div>
-        {po.status === "closed" && (
-          <span className="text-[11px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">PO Closed</span>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        {outletRows.map(({ d, colours, totalOrdered, totalReceived, totalDefect, rowStyle, dotStyle, statusLabel }) => (
-          <div key={d.id} className={`rounded-lg border px-4 py-3 ${rowStyle}`}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotStyle}`} />
-                <span className="font-semibold text-sm text-gray-800">{d.outlet.name}</span>
-                <span className="text-xs text-gray-400 font-mono">{d.outlet.marking}</span>
-              </div>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="text-gray-500">
-                  {totalReceived}/{totalOrdered} pairs
-                  {totalDefect > 0 && <span className="text-red-600 ml-1">· {totalDefect} defect{totalDefect > 1 ? "s" : ""}</span>}
-                </span>
-                <span className={`font-medium ${dotStyle === "bg-green-500" ? "text-green-700" : dotStyle === "bg-red-500" ? "text-red-600" : "text-amber-600"}`}>
-                  {statusLabel}
-                </span>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {colours.map((c, i) => (
-                <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
-                  <span className="font-medium">{c.colorName}</span>
-                  <span className="text-gray-400">
-                    {c.received != null
-                      ? <>{c.received}<span className="text-gray-300">/{c.ordered}</span>{c.defect ? <span className="text-red-500 ml-1">-{c.defect}</span> : null}</>
-                      : <span className="text-gray-300">{c.ordered} ordered</span>
-                    }
-                  </span>
+                  {stage.done && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>}
                 </div>
-              ))}
-            </div>
-          </div>
-        ))}
+                <p className="text-[10px] text-gray-500 whitespace-nowrap">{stage.label}</p>
+                {stage.date && <p className="text-[10px] text-gray-400">{stage.date}</p>}
+              </div>
+              {i < arr.length - 1 && (
+                <div className="flex-1 h-0.5 bg-gray-200 mb-5">
+                  <div className={`h-full bg-green-500 transition-all`} style={{ width: i < shippedGroups ? "100%" : "0%" }} />
+                </div>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
       </div>
 
-      {po.status !== "closed" && (
-        <div className="flex justify-end pt-1">
-          <button onClick={closePO} disabled={saving}
-            className="btn-primary text-xs px-4">
-            {saving ? "Saving…" : "Close PO"}
-          </button>
+      {/* Per-SKU ship tracking */}
+      {skuGroups.length > 0 && (
+        <div className="border border-gray-200 rounded-xl">
+          <div className="bg-gray-50 px-4 py-2 border-b border-gray-100 rounded-t-xl flex items-center justify-between">
+            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Shipment by SKU</p>
+            <p className="text-xs text-gray-400">{shippedGroups}/{totalGroups} shipped</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {skuGroups.map(grp => {
+              const shippedInGroup = grp.items.filter(i => (localDates[i.id] ?? (i.itemShipDate ? i.itemShipDate.slice(0,10) : "")) !== "").length;
+              return (
+                <div key={grp.key}>
+                  {/* Main SKU group header */}
+                  <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 border-b border-gray-100">
+                    {grp.photoUrl ? (
+                      <Image src={grp.photoUrl} alt={grp.key} width={28} height={28} className="w-7 h-7 rounded-md object-cover border border-gray-200 flex-shrink-0" />
+                    ) : (
+                      <div className="w-7 h-7 rounded-md bg-gray-100 border border-dashed border-gray-200 flex-shrink-0" />
+                    )}
+                    <p className="text-xs font-bold text-gray-700 flex-1">{grp.key}</p>
+                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${shippedInGroup === grp.items.length ? "bg-green-100 text-green-700" : shippedInGroup > 0 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500"}`}>
+                      {shippedInGroup}/{grp.items.length} shipped
+                    </span>
+                  </div>
+                  {/* Per-colour rows */}
+                  {grp.items.map(item => {
+                    const itemKey = item.id;
+                    const dateVal = localDates[itemKey] ?? (item.itemShipDate ? (item.itemShipDate as string).slice(0, 10) : "");
+                    const isShipped = dateVal !== "";
+                    const isSaving  = saving[itemKey];
+                    return (
+                      <div key={itemKey} className={`flex items-center gap-3 pl-8 pr-4 py-2 border-b border-gray-50 transition-colors ${isShipped ? "bg-green-50/30" : ""}`}>
+                        {item.photoUrl ? (
+                          <Image src={item.photoUrl} alt={item.colorName ?? ""} width={28} height={28} className="w-7 h-7 rounded-md object-cover border border-gray-100 flex-shrink-0" />
+                        ) : (
+                          <div className="w-7 h-7 rounded-md bg-gray-50 border border-dashed border-gray-200 flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            {item.colorCode && <span className="text-[9px] font-mono font-bold text-brand-600 bg-brand-50 border border-brand-200 px-1 rounded">{item.colorCode}</span>}
+                            <p className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</p>
+                          </div>
+                          <p className="text-[10px] text-gray-400">{item.totalPairs} pairs</p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {isShipped ? (
+                            <span className="text-[10px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                              {isSaving ? "Saving…" : `Shipped ${fmtDate(new Date(dateVal))}`}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">{isSaving ? "Saving…" : "Pending"}</span>
+                          )}
+                          <input
+                            type="date"
+                            value={dateVal}
+                            onChange={async e => {
+                              const val = e.target.value || null;
+                              setLocalDates(prev => ({ ...prev, [itemKey]: val ?? "" }));
+                              setSaving(prev => ({ ...prev, [itemKey]: true }));
+                              if (onItemShipSave) await onItemShipSave([item.id], val);
+                              setSaving(prev => ({ ...prev, [itemKey]: false }));
+                            }}
+                            className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-400 w-28"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+          {/* Arrival date */}
+          <div className="border-t border-gray-200 bg-gray-50 px-4 py-2.5 rounded-b-xl flex items-center justify-between">
+            <p className="text-xs font-medium text-gray-600">Arrive at warehouse</p>
+            {onSave ? (
+              <input type="date"
+                className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 focus:outline-none focus:border-brand-400 w-28"
+                defaultValue={arriveActual ? arriveActual.toISOString().split("T")[0] : ""}
+                onChange={e => { if (e.target.value) onSave("deliveryDate", e.target.value); }}
+              />
+            ) : (
+              <p className="text-xs text-gray-500">{arriveActual ? fmtDate(arriveActual) : estArrive ? `Est. ${fmtDate(estArrive)}` : "—"}</p>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
+
 
 // ─── Detail Panel ─────────────────────────────────────────────────────────────
 
@@ -597,10 +523,12 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
       outletAllocations: item.outletAllocations ? JSON.parse(item.outletAllocations) : [],
     }));
 
-    // Merge any color variants from the linked sample that aren't already an item
-    if (po.sampleColorVariants) {
+    // When a Main SKU exists in Product Library, use its colors as source of truth.
+    // Only fall back to sample colorVariants if no lib colours are available.
+    const colorSource = po.libColorVariants ?? po.sampleColorVariants;
+    if (colorSource) {
       try {
-        const variants: { name: string; hex: string }[] = JSON.parse(po.sampleColorVariants);
+        const variants: { name: string; hex?: string; code?: string }[] = JSON.parse(colorSource);
         for (const cv of variants) {
           const alreadyPresent = items.some(
             i => i.colorName.toLowerCase() === cv.name.toLowerCase()
@@ -1076,10 +1004,25 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
                         return (
                         <tr key={item.id} className="hover:bg-gray-50">
                           <td className="px-3 py-2">
-                            <div className="flex items-start gap-2">
-                              <div className="w-4 h-4 rounded border border-gray-300 flex-shrink-0 bg-gray-200 mt-0.5" />
+                            <div className="flex items-start gap-2.5">
+                              {item.photoUrl ? (
+                                <Image src={item.photoUrl} alt={item.colorName ?? ""} width={40} height={40}
+                                  className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-gray-200" />
+                              ) : (
+                                <div className="w-10 h-10 rounded-lg border border-gray-200 bg-gray-100 flex-shrink-0" />
+                              )}
                               <div>
-                                <span className="text-sm text-gray-800">{item.colorName || "—"}</span>
+                                <div className="flex items-center gap-1.5">
+                                  {item.colorCode && (
+                                    <span className="text-[10px] font-mono font-bold text-brand-700 bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded">
+                                      {item.colorCode}
+                                    </span>
+                                  )}
+                                  <span className="text-sm text-gray-800">{item.colorName || "—"}</span>
+                                </div>
+                                {item.h2uSku && (
+                                  <p className="text-[10px] text-gray-400 font-mono mt-0.5">{item.h2uSku}</p>
+                                )}
                                 {allocSummary && allocSummary.length > 0 && (
                                   <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">
                                     {allocSummary.join(" · ")}
@@ -1153,16 +1096,22 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
 
         {/* Production timeline */}
         <div className="border border-gray-100 rounded-xl p-5">
-          <Timeline po={po} onSave={saveDateField} />
+          <Timeline po={po} onSave={saveDateField} onItemShipSave={async (itemIds, date) => {
+            const res = await fetch(`/api/purchase-orders/${po.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ shipItems: itemIds.map(itemId => ({ id: itemId, itemShipDate: date })) }),
+            });
+            if (!res.ok) {
+              const errBody = await res.json().catch(() => ({}));
+              console.error("[shipItems save] PATCH failed", res.status, errBody);
+              return;
+            }
+            const fresh = await fetch(`/api/purchase-orders/${po.id}`).then(r => r.json());
+            if (fresh?.id) { setPo(fresh); onRefreshList?.(); }
+          }} />
         </div>
 
-        {/* Main Goods Receipt Record — shown once PO is shipped or later */}
-        {["shipped", "closed"].includes(po.status) && (
-          <GoodsReceipt po={po} onSaved={async () => {
-            try { const r = await fetch(`/api/purchase-orders/${id}`); if (r.ok) { const d = await r.json(); if (d?.id) setPo(d); } } catch {}
-            onRefreshList?.();
-          }} />
-        )}
       </div>
 
       {/* Footer */}
@@ -1201,12 +1150,18 @@ function PurchaseOrdersContent() {
   const tableRef = useRef<HTMLDivElement>(null);
 
   const selectedMonth = searchParams.get("month") ?? "all";
+  const openId = searchParams.get("open");
 
   function loadPos() {
     fetch("/api/purchase-orders").then(r => r.json()).then(d => setPos(Array.isArray(d) ? d : []));
   }
 
   useEffect(() => { loadPos(); }, []);
+
+  // Auto-open a PO when ?open=<id> is in the URL
+  useEffect(() => {
+    if (openId) setSelectedId(openId);
+  }, [openId]);
 
   async function deletePO(id: string, poNumber: string, e: React.MouseEvent) {
     e.stopPropagation();
@@ -1279,24 +1234,22 @@ function PurchaseOrdersContent() {
       (p.brand ?? "").toLowerCase().includes(q);
   });
 
-  // Build month → supplier grouping for the grouped list view
-  type SupGroup   = { name: string; pos: PO[] };
+  // Build month → PO grouping for the grouped list view (one group per PO number)
+  type SupGroup   = { name: string; poNumber: string; pos: PO[] };
   type MonthGroup = { mk: string; ml: string; suppliers: SupGroup[] };
   const groupedPOs = useMemo<MonthGroup[]>(() => {
     const sorted = [...filtered].sort((a, b) => {
       const mc = monthKey(b.date).localeCompare(monthKey(a.date));
       if (mc !== 0) return mc;
-      const sc = a.manufacturer.name.localeCompare(b.manufacturer.name);
-      if (sc !== 0) return sc;
-      return new Date(b.date).getTime() - new Date(a.date).getTime();
+      return (a.poNumber ?? "").localeCompare(b.poNumber ?? "");
     });
     const groups: MonthGroup[] = [];
     for (const po of sorted) {
       const mk = monthKey(po.date);
       let mGroup = groups.find(g => g.mk === mk);
       if (!mGroup) { mGroup = { mk, ml: monthLabel(mk), suppliers: [] }; groups.push(mGroup); }
-      let sGroup = mGroup.suppliers.find(s => s.name === po.manufacturer.name);
-      if (!sGroup) { sGroup = { name: po.manufacturer.name, pos: [] }; mGroup.suppliers.push(sGroup); }
+      let sGroup = mGroup.suppliers.find(s => s.poNumber === po.poNumber);
+      if (!sGroup) { sGroup = { name: po.manufacturer.name, poNumber: po.poNumber ?? "", pos: [] }; mGroup.suppliers.push(sGroup); }
       sGroup.pos.push(po);
     }
     return groups;
@@ -1308,6 +1261,9 @@ function PurchaseOrdersContent() {
 
   return (
     <div className="space-y-4">
+      {/* Tab navigation */}
+      <POTabs />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1438,7 +1394,7 @@ function PurchaseOrdersContent() {
                       <div className="flex items-center gap-3">
                         <span className="text-white text-xs font-bold tracking-widest uppercase">{mGroup.ml}</span>
                         <span className="text-gray-400 text-[11px]">
-                          {totalInMonth} PO{totalInMonth !== 1 ? "s" : ""} · {mGroup.suppliers.map(g => g.name).join(" · ")}
+                          {totalInMonth} PO{totalInMonth !== 1 ? "s" : ""} · {[...new Set(mGroup.suppliers.map(g => g.name))].sort().join(" · ")}
                         </span>
                       </div>
                     </td>
@@ -1451,13 +1407,18 @@ function PurchaseOrdersContent() {
                 if (selectedSupplier === "all") {
                   const year       = mGroup.mk.split("-")[0];
                   const monthAbbr  = mGroup.ml.split(" ")[0];          // "MAY"
-                  const poCode     = `PO-${year}-${monthAbbr}${String(si + 1).padStart(2, "0")}`;
+                  const firstPoNum  = sGroup.pos[0]?.poNumber ?? "";
+                  const poNumMatch  = firstPoNum.match(/^([A-Za-z]+)-(\d+)$/);
+                  const poCode      = poNumMatch
+                    ? `PO-${year}-${poNumMatch[1].toUpperCase()}${poNumMatch[2]}`
+                    : `PO-${year}-${monthAbbr}${String(si + 1).padStart(2, "0")}`;
                   const totalPairs = sGroup.pos.reduce((s, p) => s + p.totalPairs, 0);
+                  const totalRmb   = sGroup.pos.reduce((s, p) => s + p.totalPrice, 0);
                   const totalRm    = sGroup.pos.reduce((s, p) => s + (p.fxRate ? p.totalPrice * p.fxRate : p.totalPrice * 0.62), 0);
                   const groupPdfUrl = `/api/purchase-orders/group-pdf?ids=${sGroup.pos.map(p => p.id).join(",")}&group=${encodeURIComponent(poCode)}&supplier=${encodeURIComponent(sGroup.name)}`;
                   const groupPlUrl  = `/api/purchase-orders/group-pdf-pl?ids=${sGroup.pos.map(p => p.id).join(",")}&group=${encodeURIComponent(poCode)}&supplier=${encodeURIComponent(sGroup.name)}`;
                   rows.push(
-                    <tr key={`s-${mGroup.mk}-${sGroup.name}`}>
+                    <tr key={`s-${mGroup.mk}-${sGroup.poNumber}`}>
                       <td colSpan={9} className="px-4 py-2 bg-brand-50 border-y border-brand-100">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5">
@@ -1468,7 +1429,7 @@ function PurchaseOrdersContent() {
                             <span className="text-xs text-gray-400">
                               · {sGroup.pos.length} PO{sGroup.pos.length !== 1 ? "s" : ""}
                               {totalPairs > 0 && <> · {totalPairs.toLocaleString()} pairs</>}
-                              {totalRm > 0 && <> · RM {Math.round(totalRm).toLocaleString()}</>}
+                              {totalRm > 0 && <> · RM {Math.round(totalRm).toLocaleString()}{totalRmb > 0 && <> · ¥{Math.round(totalRmb).toLocaleString()}</>}</>}
                             </span>
                           </div>
                           <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
@@ -1503,17 +1464,25 @@ function PurchaseOrdersContent() {
                         "hover:bg-gray-50"
                       }`}
                     >
-                      {/* Shoe photo replaces PO number */}
+                      {/* One photo per unique main SKU, up to 4 */}
                       <td className="px-3 py-2 pl-6">
-                        {p.photoUrl ? (
-                          <div className="w-11 h-11 rounded-lg overflow-hidden border border-gray-100 bg-gray-50 shrink-0">
-                            <Image src={p.photoUrl} alt={p.productName ?? ""} width={44} height={44} className="object-cover w-full h-full" />
-                          </div>
-                        ) : (
-                          <div className="w-11 h-11 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center">
-                            <Camera size={13} className="text-gray-300" />
-                          </div>
-                        )}
+                        <div className="flex gap-1">
+                          {(p.items ?? []).length > 0 ? (p.items ?? []).map((item, idx) => (
+                            item.photoUrl ? (
+                              <div key={idx} className="w-14 h-14 rounded-md overflow-hidden border border-gray-100 bg-gray-50 flex-shrink-0">
+                                <Image src={item.photoUrl} alt={item.colorName ?? ""} width={56} height={56} className="object-cover w-full h-full" />
+                              </div>
+                            ) : (
+                              <div key={idx} className="w-14 h-14 rounded-md border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center flex-shrink-0">
+                                <Camera size={14} className="text-gray-300" />
+                              </div>
+                            )
+                          )) : (
+                            <div className="w-14 h-14 rounded-md border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center">
+                              <Camera size={14} className="text-gray-300" />
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-3">
                         {p.poType ? (
@@ -1523,9 +1492,10 @@ function PurchaseOrdersContent() {
                         ) : <span className="text-gray-300 text-xs">—</span>}
                       </td>
                       <td className="px-3 py-3">
-                        <div className="font-medium text-gray-900 leading-tight">{p.productName || p.brand}</div>
-                        {p.libProductName && (
-                          <div className="text-xs text-gray-500 mt-0.5 leading-tight">{p.libProductName}</div>
+                        {(p.productName || p.libProductName) ? (
+                          <div className="font-medium text-gray-900 leading-tight">{p.productName || p.libProductName}</div>
+                        ) : (
+                          <span className="text-gray-300 text-xs">—</span>
                         )}
                         {p.parentPoNumber && (
                           <div className="text-xs text-gray-400 mt-0.5">
@@ -1540,8 +1510,11 @@ function PurchaseOrdersContent() {
                       <td className="px-3 py-3 text-gray-800 font-medium text-right">
                         {p.totalPairs.toLocaleString()}
                       </td>
-                      <td className="px-3 py-3 text-gray-800 font-medium text-right">
-                        {Math.round(rmCost).toLocaleString()}
+                      <td className="px-3 py-3 text-right">
+                        <div className="font-medium text-gray-800">{Math.round(rmCost).toLocaleString()}</div>
+                        {p.totalPrice > 0 && (
+                          <div className="text-[11px] text-gray-400">¥{Math.round(p.totalPrice).toLocaleString()}</div>
+                        )}
                       </td>
                       <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">
                         {fmt(p.deliveryDate)}

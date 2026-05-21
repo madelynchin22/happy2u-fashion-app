@@ -11,6 +11,10 @@ export async function GET() {
     include: {
       manufacturer: { select: { id: true, name: true, leadTimeDays: true, rating: true } },
       _count: { select: { items: true } },
+      items: {
+        select: { photoUrl: true, h2uSku: true, colorName: true },
+        orderBy: { id: "asc" },
+      },
     },
     orderBy: { date: "desc" },
   });
@@ -41,11 +45,39 @@ export async function GET() {
   }
   const libProductMap = new Map(samples.map(s => [s.orderNumber, libNameByUuid.get(s.id) ?? null]));
 
-  const result = pos.map(p => ({
-    ...p,
-    photoUrl: p.sampleOrderId ? (samplePhotoMap.get(p.sampleOrderId) ?? null) : null,
-    libProductName: p.sampleOrderId ? (libProductMap.get(p.sampleOrderId) ?? null) : null,
-  }));
+  // Fallback: look up shoe photos from ProductLibrary by h2uSku for items without photoUrl
+  const allH2uSkus = pos.flatMap(p => (p.items ?? []).map(i => i.h2uSku).filter(Boolean)) as string[];
+  const libByH2u = allH2uSkus.length
+    ? await prisma.productLibrary.findMany({
+        where: { h2uSku: { in: allH2uSkus } },
+        select: { h2uSku: true, shoePhotoUrl: true },
+      })
+    : [];
+  const h2uPhotoMap = new Map(libByH2u.map(l => [l.h2uSku, l.shoePhotoUrl]));
+
+  const MAIN_SKU_RE = /^(S\d{4})/i;
+
+  const result = pos.map(p => {
+    // Deduplicate items by main SKU prefix (S####), pick first photo per unique model
+    const seen = new Set<string>();
+    const dedupedItems: { photoUrl: string | null; h2uSku: string | null; colorName: string | null }[] = [];
+    for (const item of p.items ?? []) {
+      const key = item.h2uSku?.match(MAIN_SKU_RE)?.[1]?.toUpperCase() ?? item.h2uSku ?? "";
+      if (!seen.has(key)) {
+        seen.add(key);
+        if (dedupedItems.length < 4) {
+          const photo = item.photoUrl ?? (item.h2uSku ? (h2uPhotoMap.get(item.h2uSku) ?? null) : null);
+          dedupedItems.push({ ...item, photoUrl: photo });
+        }
+      }
+    }
+    return {
+      ...p,
+      items: dedupedItems,
+      photoUrl: p.sampleOrderId ? (samplePhotoMap.get(p.sampleOrderId) ?? null) : null,
+      libProductName: p.sampleOrderId ? (libProductMap.get(p.sampleOrderId) ?? null) : null,
+    };
+  });
 
   return NextResponse.json(result);
 }

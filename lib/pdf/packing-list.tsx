@@ -10,150 +10,193 @@ Font.register({
   ],
 });
 
-const S = StyleSheet.create({
-  page:      { fontFamily: "NotoSansSC", fontSize: 8, padding: "18 22", color: "#1a1a1a" },
-  header:    { flexDirection: "row", justifyContent: "space-between", borderBottom: "2pt solid #d03070", paddingBottom: 8, marginBottom: 10 },
-  logoText:  { fontSize: 18, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" },
-  docTitle:  { fontSize: 11, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#374151", marginTop: 2 },
-  summaryBox:{ alignItems: "flex-end" },
-  metaRow:   { flexDirection: "row", gap: 4, marginBottom: 2 },
-  metaLabel: { color: "#888", width: 70, textAlign: "right" },
-  metaValue: { fontFamily: "NotoSansSC", fontWeight: "bold" },
-  // Summary table (top-right: outlet → total pairs)
-  summaryTable: { border: "0.5pt solid #e5e7eb", marginBottom: 10 },
-  stRow:     { flexDirection: "row", borderBottom: "0.5pt solid #e5e7eb" },
-  stHead:    { backgroundColor: "#fdf4f7" },
-  stCell:    { padding: "3 6" },
-  // Main table
-  table:     { },
-  thead:     { flexDirection: "row", backgroundColor: "#1a1a1a" },
-  th:        { color: "white", padding: "4 4", fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, borderRight: "0.5pt solid #555" },
-  tr:        { flexDirection: "row", borderBottom: "0.5pt solid #e5e7eb" },
-  trAlt:     { backgroundColor: "#fdf4f7" },
-  td:        { padding: "3 4", borderRight: "0.5pt solid #e5e7eb" },
-  // Col widths
-  cPhoto:    { width: 30 },
-  cSku:      { width: 40 },
-  cH2u:      { width: 40 },
-  cColor:    { width: 40 },
-  cMarking:  { width: 68 },
-  cSize:     { width: 18, textAlign: "center" },
-  cPairs:    { width: 24, textAlign: "center", fontFamily: "NotoSansSC", fontWeight: "bold" },
-  cDate:     { width: 40 },
-  cRemark:   { flex: 1 },
-  totalRow:  { flexDirection: "row", backgroundColor: "#1a1a1a", borderBottom: "0.5pt solid #333" },
-  totalLabel:{ color: "white", fontFamily: "NotoSansSC", fontWeight: "bold", padding: "3 4" },
-  footer:    { position: "absolute", bottom: 14, left: 22, right: 22, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: "#aaa", borderTop: "0.5pt solid #e5e7eb", paddingTop: 4 },
-});
-
 const SIZES = ["36","37","38","39","40","41"] as const;
 
+const W = {
+  supSku:  70,
+  h2uSku:  52,
+  color:   42,
+  marking: 80,
+  size:    22,
+  pair:    28,
+  delivery:50,
+  remark:  60,
+};
+
+const S = StyleSheet.create({
+  page:      { fontFamily: "NotoSansSC", fontSize: 7.5, padding: "16 20 24 20", color: "#111" },
+  // Header
+  headerRow:     { flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
+  docTitle:      { fontSize: 18, fontFamily: "NotoSansSC", fontWeight: "bold", color: "#111", marginBottom: 2 },
+  poInfo:        { fontSize: 8, color: "#555", marginBottom: 1 },
+  // Outlet summary table (top-right)
+  summaryTable:  { border: "0.75pt solid #aaa", fontSize: 7.5 },
+  smHead:        { flexDirection: "row", backgroundColor: "#e5e5e5", borderBottom: "0.5pt solid #aaa" },
+  smRow:         { flexDirection: "row", borderBottom: "0.5pt solid #ddd" },
+  smTotal:       { flexDirection: "row", backgroundColor: "#FFFF00", borderTop: "0.75pt solid #aaa" },
+  smCell:        { padding: "2 4" },
+  // Main table
+  table:     { marginTop: 6 },
+  sizeHeader:{ flexDirection: "row", backgroundColor: "#f0f0f0", borderBottom: "0.5pt solid #ccc" },
+  sgLabel:   { fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, padding: "2 3", color: "#333" },
+  thead:     { flexDirection: "row", backgroundColor: "#e5e5e5", borderTop: "0.75pt solid #aaa", borderBottom: "0.75pt solid #aaa" },
+  th:        { padding: "3 2", fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 6.5, borderRight: "0.5pt solid #bbb", color: "#111" },
+  tr:        { flexDirection: "row", borderBottom: "0.5pt solid #ddd" },
+  trFirst:   { borderTop: "0.75pt solid #aaa" },
+  td:        { padding: "3 2", fontSize: 7.5, borderRight: "0.5pt solid #ddd" },
+  tdBold:    { fontFamily: "NotoSansSC", fontWeight: "bold" },
+  tdCenter:  { textAlign: "center" },
+  tdRight:   { textAlign: "right" },
+  totalRow:  { flexDirection: "row", backgroundColor: "#f9f9f9", borderBottom: "0.75pt solid #999" },
+  footer:    { position: "absolute", bottom: 12, left: 20, right: 20, flexDirection: "row", justifyContent: "space-between", fontSize: 6.5, color: "#aaa", borderTop: "0.5pt solid #ddd", paddingTop: 3 },
+});
+
+function fmtDate(d?: string | null) {
+  if (!d) return "";
+  return new Date(d).toLocaleDateString("en-GB", { day:"2-digit", month:"2-digit", year:"numeric" });
+}
+
 export function PackingListPDF({ po, outlets }: { po: any; outlets: any[] }) {
-  // Build outlet totals summary
+  const items: any[] = po.items ?? [];
+
+  // Build outlet totals from packingListItems
   const outletTotals: Record<string, number> = {};
-  for (const item of po.items ?? []) {
+  for (const item of items) {
     for (const pl of item.packingListItems ?? []) {
-      outletTotals[pl.outlet?.marking ?? pl.outletId] = (outletTotals[pl.outlet?.marking ?? pl.outletId] ?? 0) + pl.totalPairs;
+      const key = pl.outlet?.marking ?? pl.outletId ?? "—";
+      outletTotals[key] = (outletTotals[key] ?? 0) + (pl.totalPairs ?? 0);
     }
   }
-  const grandTotal = Object.values(outletTotals).reduce((s, v) => s + v, 0);
+  const outletEntries = Object.entries(outletTotals).sort((a,b) => a[0].localeCompare(b[0]));
+  const grandTotal = outletEntries.reduce((s, [,v]) => s + v, 0);
 
   return (
     <Document>
       <Page size="A3" orientation="landscape" style={S.page}>
+
         {/* Header */}
-        <View style={S.header}>
+        <View style={S.headerRow}>
           <View>
-            <Text style={S.logoText}>Happy2U</Text>
             <Text style={S.docTitle}>PACKING LIST</Text>
+            <Text style={S.poInfo}>PO NO: {po.poNumber}   SUPPLIER: {po.manufacturer?.name ?? ""}</Text>
+            {po.productName && <Text style={S.poInfo}>{po.productName}</Text>}
           </View>
-          <View style={S.summaryBox}>
-            <View style={S.metaRow}>
-              <Text style={S.metaLabel}>PO No:</Text>
-              <Text style={[S.metaValue, { color: "#d03070" }]}>{po.poNumber}</Text>
+
+          {/* Outlet summary table */}
+          <View style={S.summaryTable}>
+            <View style={S.smHead}>
+              <Text style={[S.smCell, { width: 100, fontFamily:"NotoSansSC", fontWeight:"bold", fontSize:6.5 }]}>MARKING</Text>
+              <Text style={[S.smCell, { width: 40, fontFamily:"NotoSansSC", fontWeight:"bold", fontSize:6.5, textAlign:"right" }]}>PAIRS</Text>
             </View>
-            <View style={S.metaRow}>
-              <Text style={S.metaLabel}>Manufacturer:</Text>
-              <Text style={S.metaValue}>{po.manufacturer?.name}</Text>
-            </View>
-            {/* Outlet summary box */}
-            <View style={[S.summaryTable, { marginTop: 6 }]}>
-              <View style={[S.stRow, S.stHead]}>
-                <Text style={[S.stCell, { width: 90, fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, color: "#d03070" }]}>Outlet Marking</Text>
-                <Text style={[S.stCell, { width: 40, fontFamily: "NotoSansSC", fontWeight: "bold", fontSize: 7, textAlign: "right", color: "#d03070" }]}>Pairs</Text>
+            {outletEntries.map(([marking, pairs]) => (
+              <View key={marking} style={S.smRow}>
+                <Text style={[S.smCell, { width: 100 }]}>{marking}</Text>
+                <Text style={[S.smCell, { width: 40, textAlign:"right", fontFamily:"NotoSansSC", fontWeight:"bold" }]}>{pairs}</Text>
               </View>
-              {Object.entries(outletTotals).map(([marking, pairs]) => (
-                <View key={marking} style={S.stRow}>
-                  <Text style={[S.stCell, { width: 90 }]}>{marking}</Text>
-                  <Text style={[S.stCell, { width: 40, textAlign: "right", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{pairs}</Text>
-                </View>
-              ))}
-              <View style={[S.stRow, { backgroundColor: "#1a1a1a" }]}>
-                <Text style={[S.stCell, { width: 90, color: "white", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>TOTAL</Text>
-                <Text style={[S.stCell, { width: 40, textAlign: "right", color: "white", fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{grandTotal}</Text>
-              </View>
+            ))}
+            <View style={S.smTotal}>
+              <Text style={[S.smCell, { width: 100, fontFamily:"NotoSansSC", fontWeight:"bold" }]}>TOTAL</Text>
+              <Text style={[S.smCell, { width: 40, textAlign:"right", fontFamily:"NotoSansSC", fontWeight:"bold" }]}>{grandTotal}</Text>
             </View>
           </View>
         </View>
 
-        {/* Main table */}
+        {/* Table */}
         <View style={S.table}>
-          <View style={S.thead}>
-            <Text style={[S.th, S.cSku]}>Supplier SKU</Text>
-            <Text style={[S.th, S.cH2u]}>H2U SKU</Text>
-            <Text style={[S.th, S.cColor]}>Color</Text>
-            <Text style={[S.th, S.cMarking]}>Marking (Outlet)</Text>
-            {SIZES.map(s => <Text key={s} style={[S.th, S.cSize]}>{s}</Text>)}
-            <Text style={[S.th, S.cPairs]}>Pairs</Text>
-            <Text style={[S.th, S.cDate]}>Delivery</Text>
-            <Text style={[S.th, S.cRemark]}>Remark</Text>
+          {/* Size group label */}
+          <View style={{ flexDirection: "row" }}>
+            <View style={{ width: W.supSku + W.h2uSku + W.color + W.marking }} />
+            <View style={[S.sizeHeader, { flex: 0 }]}>
+              <Text style={S.sgLabel}>尺码 / SIZE</Text>
+            </View>
           </View>
 
-          {po.items?.flatMap((item: any, iIdx: number) => {
-            const rows: React.ReactNode[] = [];
-            const plItems = item.packingListItems ?? [];
-            if (plItems.length === 0) return rows;
+          {/* Column headers */}
+          <View style={S.thead}>
+            <Text style={[S.th, { width: W.supSku }]}>SUPPLIER SKU</Text>
+            <Text style={[S.th, { width: W.h2uSku }]}>H2U SKU</Text>
+            <Text style={[S.th, { width: W.color }]}>COLOR</Text>
+            <Text style={[S.th, { width: W.marking }]}>MARKING</Text>
+            {SIZES.map(s => <Text key={s} style={[S.th, { width: W.size, textAlign:"center" }]}>{s}</Text>)}
+            <Text style={[S.th, { width: W.pair, textAlign:"center" }]}>Pair</Text>
+            <Text style={[S.th, { width: W.delivery }]}>Delivery date</Text>
+            <Text style={[S.th, { width: W.remark }]}>REMARK</Text>
+          </View>
 
+          {/* Data rows: grouped by item (colour), one sub-row per outlet */}
+          {items.flatMap((item: any, iIdx: number) => {
+            const plItems: any[] = item.packingListItems ?? [];
+            if (plItems.length === 0) return [];
+
+            const rows: React.ReactNode[] = [];
+
+            // Outlet rows
             plItems.forEach((pl: any, plIdx: number) => {
-              const alt = (iIdx + plIdx) % 2 === 1;
+              const isFirst = plIdx === 0;
               rows.push(
-                <View key={`${item.id}-${pl.id}`} style={[S.tr, alt ? S.trAlt : {}]}>
-                  <Text style={[S.td, S.cSku]}>{plIdx === 0 ? item.supplierSku ?? "" : ""}</Text>
-                  <Text style={[S.td, S.cH2u]}>{plIdx === 0 ? item.h2uSku ?? "" : ""}</Text>
-                  <Text style={[S.td, S.cColor]}>{plIdx === 0 ? item.colorName ?? "" : ""}</Text>
-                  <Text style={[S.td, S.cMarking]}>{pl.outlet?.marking ?? pl.outletId}</Text>
-                  {SIZES.map(s => <Text key={s} style={[S.td, S.cSize]}>{(pl as any)[`qty${s}`] || ""}</Text>)}
-                  <Text style={[S.td, S.cPairs]}>{pl.totalPairs}</Text>
-                  <Text style={[S.td, S.cDate]}>{pl.deliveryDate ? new Date(pl.deliveryDate).toLocaleDateString("en-MY") : ""}</Text>
-                  <Text style={[S.td, S.cRemark]}>{pl.remark ?? ""}</Text>
+                <View key={`${item.id}-${pl.id ?? plIdx}`} style={[S.tr, isFirst ? S.trFirst : {}]}>
+                  {/* Supplier SKU — shown only on first row of this colour block */}
+                  <Text style={[S.td, S.tdBold, { width: W.supSku }]}>
+                    {isFirst ? (item.supplierSku ?? "") : ""}
+                  </Text>
+                  <Text style={[S.td, { width: W.h2uSku }]}>
+                    {isFirst ? (item.h2uSku ?? "") : ""}
+                  </Text>
+                  <Text style={[S.td, { width: W.color }]}>
+                    {isFirst ? (item.colorName ?? "") : ""}
+                  </Text>
+                  <Text style={[S.td, { width: W.marking }]}>{pl.outlet?.marking ?? pl.outletId ?? ""}</Text>
+                  {SIZES.map(s => (
+                    <Text key={s} style={[S.td, S.tdCenter, { width: W.size }]}>
+                      {(pl[`qty${s}`] ?? 0) || ""}
+                    </Text>
+                  ))}
+                  <Text style={[S.td, S.tdBold, S.tdCenter, { width: W.pair }]}>{pl.totalPairs ?? ""}</Text>
+                  <Text style={[S.td, { width: W.delivery }]}>
+                    {isFirst && pl.deliveryDate ? fmtDate(pl.deliveryDate) : ""}
+                  </Text>
+                  <Text style={[S.td, { width: W.remark }]}>{pl.remark ?? ""}</Text>
                 </View>
               );
             });
 
-            // Sub-total row per item
-            const itemTotal = plItems.reduce((s: number, p: any) => s + p.totalPairs, 0);
+            // Sub-total row for this colour
+            const colourTotal = plItems.reduce((s: number, p: any) => s + (p.totalPairs ?? 0), 0);
             rows.push(
-              <View key={`${item.id}-total`} style={[S.tr, { backgroundColor: "#f9fafb" }]}>
-                <Text style={[S.td, S.cSku, { fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{item.supplierSku}</Text>
-                <Text style={[S.td, S.cH2u, { fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{item.h2uSku}</Text>
-                <Text style={[S.td, S.cColor, { fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{item.colorName} TOTAL</Text>
-                <Text style={[S.td, S.cMarking]}></Text>
+              <View key={`${item.id}-subtotal`} style={S.totalRow}>
+                <Text style={[S.td, S.tdBold, { width: W.supSku }]}>{item.supplierSku ?? ""}</Text>
+                <Text style={[S.td, S.tdBold, { width: W.h2uSku }]}>{item.h2uSku ?? ""}</Text>
+                <Text style={[S.td, S.tdBold, { width: W.color }]}>{item.colorName ?? ""}</Text>
+                <Text style={[S.td, S.tdBold, { width: W.marking }]}>TOTAL</Text>
                 {SIZES.map(s => {
-                  const sizeTotal = plItems.reduce((sum: number, p: any) => sum + ((p as any)[`qty${s}`] ?? 0), 0);
-                  return <Text key={s} style={[S.td, S.cSize, { fontFamily: "NotoSansSC", fontWeight: "bold" }]}>{sizeTotal || ""}</Text>;
+                  const st = plItems.reduce((sum: number, p: any) => sum + (p[`qty${s}`] ?? 0), 0);
+                  return <Text key={s} style={[S.td, S.tdBold, S.tdCenter, { width: W.size }]}>{st || ""}</Text>;
                 })}
-                <Text style={[S.td, S.cPairs, { fontFamily: "NotoSansSC", fontWeight: "bold", color: "#d03070" }]}>{itemTotal}</Text>
-                <Text style={[S.td, S.cDate]}></Text>
-                <Text style={[S.td, S.cRemark]}></Text>
+                <Text style={[S.td, S.tdBold, S.tdCenter, { width: W.pair }]}>{colourTotal}</Text>
+                <Text style={[S.td, { width: W.delivery }]}></Text>
+                <Text style={[S.td, { width: W.remark }]}></Text>
               </View>
             );
+
             return rows;
           })}
+
+          {/* Grand total */}
+          <View style={[S.tr, { backgroundColor: "#fffde7", borderTop: "1pt solid #888" }]}>
+            <Text style={[S.td, S.tdBold, { width: W.supSku + W.h2uSku + W.color + W.marking }]}>GRAND TOTAL</Text>
+            {SIZES.map(s => {
+              const st = items.reduce((sum, item) =>
+                sum + (item.packingListItems ?? []).reduce((ss: number, p: any) => ss + (p[`qty${s}`] ?? 0), 0), 0);
+              return <Text key={s} style={[S.td, S.tdBold, S.tdCenter, { width: W.size }]}>{st || ""}</Text>;
+            })}
+            <Text style={[S.td, S.tdBold, S.tdCenter, { width: W.pair }]}>{grandTotal}</Text>
+            <Text style={[S.td, { width: W.delivery + W.remark }]}></Text>
+          </View>
         </View>
 
         <View style={S.footer} fixed>
-          <Text>Happy2U Fashion Management System</Text>
-          <Text>Packing List — {po.poNumber} · {new Date().toLocaleDateString("en-MY")}</Text>
+          <Text>Packing List — {po.poNumber} · {po.manufacturer?.name ?? ""}</Text>
+          <Text>Generated {new Date().toLocaleDateString("en-GB")}</Text>
         </View>
       </Page>
     </Document>

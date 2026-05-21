@@ -1,12 +1,14 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { Store, ChevronRight } from "lucide-react";
+import { Store, ChevronRight, CheckCircle2 } from "lucide-react";
+import { POTabs } from "@/components/layout/POTabs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type POItem = {
   id: string;
   colorName: string | null;
+  h2uSku: string | null;
   outletAllocations: string | null;
   totalPairs: number;
 };
@@ -46,99 +48,117 @@ type ShippedPO = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: "Pending", in_transit: "In Transit", arrived: "Arrived", receipt_done: "Receipt Done",
-};
-const STATUS_STYLE: Record<string, string> = {
-  pending:      "bg-gray-100 text-gray-500",
-  in_transit:   "bg-amber-100 text-amber-700",
-  arrived:      "bg-blue-100 text-blue-700",
-  receipt_done: "bg-green-100 text-green-700",
-};
-
 function fmt(d?: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-function allocatedItems(po: ShippedPO, outletId: string): POItem[] {
-  return po.items.filter(item => {
-    if (!item.outletAllocations) return false;
-    try { return JSON.parse(item.outletAllocations).some((a: any) => a.outletId === outletId); }
-    catch { return false; }
-  });
-}
+type OutletAlloc = { outletId: string; qty: number };
 
-function orderedForAlloc(item: POItem, outletId: string): number {
-  if (!item.outletAllocations) return 0;
+function parseItemOutlets(item: POItem): OutletAlloc[] {
+  if (!item.outletAllocations) return [];
   try {
-    const alloc = JSON.parse(item.outletAllocations).find((a: any) => a.outletId === outletId);
-    return alloc ? [36,37,38,39,40,41,42].reduce((s: number, sz: number) => s + (alloc[`qty${sz}`] || 0), 0) : 0;
-  } catch { return 0; }
+    const allocs: any[] = JSON.parse(item.outletAllocations);
+    return allocs.map(a => ({
+      outletId: a.outletId,
+      qty: [36, 37, 38, 39, 40, 41, 42].reduce((s: number, sz: number) => s + (a[`qty${sz}`] || 0), 0),
+    })).filter(x => x.outletId && x.qty > 0);
+  } catch { return []; }
 }
 
-// ─── Outlet Card ──────────────────────────────────────────────────────────────
+// ─── SKU Card ─────────────────────────────────────────────────────────────────
 
-function OutletCard({ po, d, onSaved }: { po: ShippedPO; d: OutletDelivery; onSaved: () => void }) {
-  const [open, setOpen]   = useState(false);
+type OutletRow = {
+  outletId: string;
+  outletName: string;
+  outletMarking: string;
+  deliveryId: string;
+  orderedQty: number;
+  existingRI: ReceiptItem | undefined;
+};
+
+function SKUCard({ po, item, onSaved }: { po: ShippedPO; item: POItem; onSaved: () => void }) {
+  const [open, setOpen]     = useState(false);
   const [saving, setSaving] = useState(false);
-  const [rows, setRows]   = useState<{ received: string; defect: string; notes: string }[]>([]);
+  const [inputs, setInputs] = useState<{ received: string; defect: string; notes: string }[]>([]);
 
-  function initRows() {
-    const source = d.receiptItems.length > 0
-      ? d.receiptItems.map(ri => ({
-          received: ri.receivedQty != null ? String(ri.receivedQty) : "",
-          defect:   ri.defectQty   != null ? String(ri.defectQty)   : "",
-          notes:    ri.notes ?? "",
-        }))
-      : allocatedItems(po, d.outletId).map(() => ({ received: "", defect: "", notes: "" }));
-    setRows(source);
+  const deliveryMap = new Map(po.outletDeliveries.map(d => [d.outletId, d]));
+  const outletAllocs = parseItemOutlets(item).filter(a => deliveryMap.has(a.outletId));
+
+  const outletRows: OutletRow[] = outletAllocs.map(a => {
+    const d = deliveryMap.get(a.outletId)!;
+    return {
+      outletId: a.outletId,
+      outletName: d.outlet.name,
+      outletMarking: d.outlet.marking,
+      deliveryId: d.id,
+      orderedQty: a.qty,
+      existingRI: d.receiptItems.find(ri => ri.poItemId === item.id),
+    };
+  });
+
+  function initInputs() {
+    setInputs(outletRows.map(r => ({
+      received: r.existingRI?.receivedQty != null ? String(r.existingRI.receivedQty) : "",
+      defect:   r.existingRI?.defectQty   != null ? String(r.existingRI.defectQty)   : "",
+      notes:    r.existingRI?.notes ?? "",
+    })));
   }
 
   function toggle() {
-    if (!open) initRows();
+    if (!open) initInputs();
     setOpen(v => !v);
   }
 
   function update(idx: number, field: "received" | "defect" | "notes", val: string) {
-    setRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: val } : r));
+    setInputs(prev => prev.map((r, i) => i === idx ? { ...r, [field]: val } : r));
   }
 
   async function save() {
     setSaving(true);
-    const usingExisting = d.receiptItems.length > 0;
-    const source = usingExisting ? d.receiptItems : allocatedItems(po, d.outletId);
+    const delivery = po.outletDeliveries[0]; // used only for arrival fallback below
+    void delivery;
 
-    const receiptItems = source.map((item, idx) => {
-      const r = rows[idx] ?? { received: "", defect: "", notes: "" };
-      const ordered = "outletAllocations" in item
-        ? orderedForAlloc(item as POItem, d.outletId)
-        : (item as ReceiptItem).orderedQty;
-      return {
-        ...(usingExisting ? { id: item.id } : {}),
-        poItemId:   usingExisting ? (item as ReceiptItem).poItemId : (item as POItem).id,
-        colorName:  item.colorName ?? null,
-        orderedQty: ordered,
-        receivedQty: r.received !== "" ? Number(r.received) : null,
-        defectQty:   r.defect   !== "" ? Number(r.defect)   : null,
-        notes:       r.notes || null,
-      };
-    });
+    await Promise.all(
+      outletRows.map(async (row, idx) => {
+        const inp = inputs[idx] ?? { received: "", defect: "", notes: "" };
+        if (inp.received === "" && inp.defect === "" && inp.notes === "") return;
 
-    await fetch(`/api/outlet-deliveries/${d.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        status: "receipt_done",
-        actualArrival: d.actualArrival ?? new Date().toISOString(),
-        receiptItems,
-      }),
-    });
+        const d = deliveryMap.get(row.outletId)!;
+        await fetch(`/api/outlet-deliveries/${row.deliveryId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actualArrival: d.actualArrival ?? new Date().toISOString(),
+            receiptItems: [{
+              ...(row.existingRI ? { id: row.existingRI.id } : {}),
+              poItemId:    item.id,
+              colorName:   item.colorName ?? null,
+              orderedQty:  row.orderedQty,
+              receivedQty: inp.received !== "" ? Number(inp.received) : null,
+              defectQty:   inp.defect   !== "" ? Number(inp.defect)   : null,
+              notes:       inp.notes || null,
+            }],
+          }),
+        });
+      })
+    );
+
     setSaving(false);
     setOpen(false);
     onSaved();
   }
 
-  const items = d.receiptItems.length > 0 ? d.receiptItems : allocatedItems(po, d.outletId);
+  const skuCode = item.h2uSku?.match(/^(S\d+)/i)?.[1] ?? item.h2uSku ?? "";
+  const colour  = item.colorName ?? "";
+  const skuLabel = [skuCode, colour].filter(Boolean).join(" ");
+
+  // Header summary: outlet short names + qty
+  const outletSummary = outletRows.map(r => `${r.outletMarking} ×${r.orderedQty}`).join(" · ");
+
+  // How many outlets have already receipted this specific item
+  const doneCount = outletRows.filter(r => r.existingRI?.receivedQty != null).length;
+  const allDone   = doneCount === outletRows.length && outletRows.length > 0;
 
   return (
     <div className="border border-gray-100 rounded-lg overflow-hidden">
@@ -147,21 +167,26 @@ function OutletCard({ po, d, onSaved }: { po: ShippedPO; d: OutletDelivery; onSa
         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
         onClick={toggle}
       >
-        <div className="flex items-center gap-3">
-          <span className="font-semibold text-sm text-gray-800">{d.outlet.name}</span>
-          <span className="text-xs text-gray-400 font-mono">{d.outlet.marking}</span>
-          <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[d.status] ?? "bg-gray-100 text-gray-500"}`}>
-            {STATUS_LABEL[d.status] ?? d.status}
-          </span>
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-sm text-gray-800">{skuLabel || "—"}</span>
+            <span className="text-xs text-gray-500">{item.totalPairs} pairs</span>
+            {allDone && (
+              <span className="flex items-center gap-1 text-[11px] text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-medium">
+                <CheckCircle2 size={11} /> All received
+              </span>
+            )}
+            {!allDone && doneCount > 0 && (
+              <span className="text-[11px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-medium">
+                {doneCount}/{outletRows.length} outlets done
+              </span>
+            )}
+          </div>
+          {outletSummary && (
+            <p className="text-[11px] text-gray-400 pl-0.5">{outletSummary}</p>
+          )}
         </div>
-        <div className="flex items-center gap-3 text-xs text-gray-500">
-          {d.actualArrival
-            ? <span>Arrived: <span className="font-medium text-gray-700">{fmt(d.actualArrival)}</span></span>
-            : d.estimatedArrival
-            ? <span className="text-gray-400">Est: {fmt(d.estimatedArrival)}</span>
-            : null}
-          <ChevronRight size={14} className={`text-gray-400 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
-        </div>
+        <ChevronRight size={14} className={`text-gray-400 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
       </div>
 
       {/* Receipt form */}
@@ -170,7 +195,7 @@ function OutletCard({ po, d, onSaved }: { po: ShippedPO; d: OutletDelivery; onSa
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-gray-200 text-gray-500 uppercase tracking-wide">
-                <th className="text-left pb-1.5 pr-3">Colour</th>
+                <th className="text-left pb-1.5 pr-3">Outlet</th>
                 <th className="text-center pb-1.5 px-2 w-20">Ordered</th>
                 <th className="text-center pb-1.5 px-2 w-24">Received ✓</th>
                 <th className="text-center pb-1.5 px-2 w-24">Defects ✗</th>
@@ -179,33 +204,34 @@ function OutletCard({ po, d, onSaved }: { po: ShippedPO; d: OutletDelivery; onSa
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {items.map((item, idx) => {
-                const r = rows[idx] ?? { received: "", defect: "", notes: "" };
-                const good = (Number(r.received) || 0) - (Number(r.defect) || 0);
-                const ordered = "outletAllocations" in item
-                  ? orderedForAlloc(item as POItem, d.outletId)
-                  : (item as ReceiptItem).orderedQty;
+              {outletRows.map((row, idx) => {
+                const inp  = inputs[idx] ?? { received: "", defect: "", notes: "" };
+                const good = (Number(inp.received) || 0) - (Number(inp.defect) || 0);
+                const done = row.existingRI?.receivedQty != null;
                 return (
-                  <tr key={idx}>
-                    <td className="pr-3 py-1.5 font-medium text-gray-800">{item.colorName ?? "—"}</td>
-                    <td className="text-center px-2 py-1.5 text-gray-500">{ordered}</td>
+                  <tr key={row.outletId} className={done ? "bg-green-50/40" : ""}>
+                    <td className="pr-3 py-1.5">
+                      <span className="font-medium text-gray-800">{row.outletName}</span>
+                      <span className="ml-1.5 text-gray-400 font-mono text-[10px]">{row.outletMarking}</span>
+                    </td>
+                    <td className="text-center px-2 py-1.5 text-gray-500">{row.orderedQty}</td>
                     <td className="px-2 py-1.5">
                       <input type="number" min="0" placeholder="0"
                         className="input text-xs w-full text-center"
-                        value={r.received} onChange={e => update(idx, "received", e.target.value)} />
+                        value={inp.received} onChange={e => update(idx, "received", e.target.value)} />
                     </td>
                     <td className="px-2 py-1.5">
                       <input type="number" min="0" placeholder="0"
                         className="input text-xs w-full text-center"
-                        value={r.defect} onChange={e => update(idx, "defect", e.target.value)} />
+                        value={inp.defect} onChange={e => update(idx, "defect", e.target.value)} />
                     </td>
                     <td className="text-center px-2 py-1.5 font-semibold text-gray-800">
-                      {r.received !== "" ? good : "—"}
+                      {inp.received !== "" ? good : "—"}
                     </td>
                     <td className="pl-2 py-1.5">
                       <input type="text" placeholder="e.g. 2 pairs torn seam"
                         className="input text-xs w-full"
-                        value={r.notes} onChange={e => update(idx, "notes", e.target.value)} />
+                        value={inp.notes} onChange={e => update(idx, "notes", e.target.value)} />
                     </td>
                   </tr>
                 );
@@ -226,7 +252,16 @@ function OutletCard({ po, d, onSaved }: { po: ShippedPO; d: OutletDelivery; onSa
 // ─── PO Block ─────────────────────────────────────────────────────────────────
 
 function POBlock({ po, onSaved }: { po: ShippedPO; onSaved: () => void }) {
-  const allDone = po.outletDeliveries.length > 0 && po.outletDeliveries.every(d => d.status === "receipt_done");
+  const allDone = po.items.length > 0 && po.items.every(item => {
+    const allocs = parseItemOutlets(item).filter(a =>
+      po.outletDeliveries.some(d => d.outletId === a.outletId)
+    );
+    if (allocs.length === 0) return true;
+    return allocs.every(a => {
+      const d = po.outletDeliveries.find(d => d.outletId === a.outletId);
+      return d?.receiptItems.some(ri => ri.poItemId === item.id && ri.receivedQty != null);
+    });
+  });
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -246,13 +281,13 @@ function POBlock({ po, onSaved }: { po: ShippedPO; onSaved: () => void }) {
         </div>
       </div>
 
-      {/* Outlet cards */}
+      {/* SKU cards */}
       <div className="p-3 space-y-2">
-        {po.outletDeliveries.length === 0 ? (
-          <p className="text-xs text-gray-400 text-center py-4">No outlet allocations for this PO</p>
+        {po.items.length === 0 ? (
+          <p className="text-xs text-gray-400 text-center py-4">No shipped items for this PO</p>
         ) : (
-          po.outletDeliveries.map(d => (
-            <OutletCard key={d.id} po={po} d={d} onSaved={onSaved} />
+          po.items.map(item => (
+            <SKUCard key={item.id} po={po} item={item} onSaved={onSaved} />
           ))
         )}
       </div>
@@ -263,7 +298,7 @@ function POBlock({ po, onSaved }: { po: ShippedPO; onSaved: () => void }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function OutletReceiptPage() {
-  const [pos, setPos]     = useState<ShippedPO[]>([]);
+  const [pos, setPos]         = useState<ShippedPO[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
@@ -277,6 +312,8 @@ export default function OutletReceiptPage() {
 
   return (
     <div className="p-8 max-w-4xl mx-auto space-y-6">
+      <POTabs />
+
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -284,7 +321,7 @@ export default function OutletReceiptPage() {
             Outlet Receipt Submit
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Record goods receipt per outlet for all shipped purchase orders
+            Record goods receipt per SKU for all shipped purchase orders
           </p>
         </div>
         {!loading && (

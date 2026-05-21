@@ -22,7 +22,6 @@ async function main() {
 
   // Create all outlet locations
   const outletData = [
-    { marking: "HQ-MELAKA",      name: "Melaka HQ",                         country: "MY", isHQ: true,  address: "Melaka, Malaysia" },
     { marking: "JN53-H2UWM",     name: "AEON Wangsa Maju KL",               country: "MY", isHQ: false },
     { marking: "JN55-H2UES",     name: "Eslite Spectrum The Starhill KL",    country: "MY", isHQ: false },
     { marking: "JN55-H2USA",     name: "AEON Shah Alam Selangor",            country: "MY", isHQ: false },
@@ -31,9 +30,11 @@ async function main() {
     { marking: "JN75-H2UABM",    name: "AEON Bandaraya Melaka Outlet",       country: "MY", isHQ: false },
     { marking: "JN75-H2UABMDEP", name: "AEON Bandaraya Melaka DEP",          country: "MY", isHQ: false },
     { marking: "JN75-H2UAK",     name: "AEON Ayer Keroh Melaka",             country: "MY", isHQ: false },
-    { marking: "JN75-H2UHQ",     name: "Happy2U Cheng HQ",                   country: "MY", isHQ: false },
+    { marking: "JN75-H2UHQ",     name: "Happy2U Cheng HQ",                   country: "MY", isHQ: true  },
     { marking: "JN81-H2UATC",    name: "AEON Tebrau City Johor Bharu",       country: "MY", isHQ: false },
     { marking: "JN81-H2UBI",     name: "AEON Bukit Indah Johor Bharu",       country: "MY", isHQ: false },
+    { marking: "JN-H2UABT",      name: "AEON Bukit Tinggi",                  country: "MY", isHQ: false },
+    { marking: "JN-H2UATM",      name: "AEON Taman Maluri KL",               country: "MY", isHQ: false },
   ];
   for (const o of outletData) {
     await prisma.outlet.upsert({

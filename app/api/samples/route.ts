@@ -16,11 +16,33 @@ export async function GET(req: NextRequest) {
     include: {
       manufacturer: { select: { id: true, name: true } },
       children: { select: { id: true, version: true, status: true } },
-      productLibraries: { select: { id: true, mainSku: true, productName: true, status: true }, take: 1 },
+      productLibraries: { select: { id: true, mainSku: true, productName: true, status: true, colorName: true, colorCode: true }, take: 1 },
     },
     orderBy: { createdAt: "desc" },
   });
-  return NextResponse.json(samples);
+
+  // For samples with a Main SKU, fetch all sibling ProductLibrary colours (the lib is source of truth)
+  const mainSkus = [...new Set(samples.map(s => s.productLibraries[0]?.mainSku).filter(Boolean))] as string[];
+  let skuColourMap: Record<string, { colorName: string | null; colorCode: string | null }[]> = {};
+  if (mainSkus.length > 0) {
+    const libRows = await prisma.productLibrary.findMany({
+      where: { mainSku: { in: mainSkus } },
+      select: { mainSku: true, colorName: true, colorCode: true },
+      orderBy: { createdAt: "asc" },
+    });
+    for (const row of libRows) {
+      if (!row.mainSku) continue;
+      if (!skuColourMap[row.mainSku]) skuColourMap[row.mainSku] = [];
+      skuColourMap[row.mainSku].push({ colorName: row.colorName, colorCode: row.colorCode });
+    }
+  }
+
+  const enriched = samples.map(s => {
+    const mainSku = s.productLibraries[0]?.mainSku;
+    return { ...s, libColours: mainSku ? (skuColourMap[mainSku] ?? null) : null };
+  });
+
+  return NextResponse.json(enriched);
 }
 
 export async function POST(req: NextRequest) {

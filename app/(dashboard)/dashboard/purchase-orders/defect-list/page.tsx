@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ExternalLink } from "lucide-react";
+import { POTabs } from "@/components/layout/POTabs";
 
 type DefectItem = {
   id: string;
@@ -46,6 +47,9 @@ export default function DefectListPage() {
 
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-6">
+      {/* Tab navigation */}
+      <POTabs />
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>

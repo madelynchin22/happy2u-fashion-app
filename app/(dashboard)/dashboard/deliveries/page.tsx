@@ -13,7 +13,10 @@ type DeliveryItem = {
 type Delivery = {
   id: string; status: string; receivedAt?: string; notes?: string;
   outlet?: { name: string; marking: string };
-  shipment?: { shipmentNumber: string; containerNumber?: string };
+  shipment?: {
+    shipmentNumber: string; containerNumber?: string;
+    items: { po: { id: string; poNumber: string; productName?: string } }[];
+  };
   items: DeliveryItem[];
 };
 
@@ -24,8 +27,14 @@ export default function DeliveriesPage() {
   const [editItems, setEditItems]   = useState<DeliveryItem[]>([]);
   const [saving, setSaving]         = useState(false);
 
+  function loadDeliveries() {
+    fetch("/api/deliveries").then(r => r.json()).then(setDeliveries).catch(() => {});
+  }
+
   useEffect(() => {
-    fetch("/api/deliveries").then(r => r.json()).then(setDeliveries);
+    loadDeliveries();
+    const poll = setInterval(loadDeliveries, 300_000);
+    return () => clearInterval(poll);
   }, []);
 
   function openDelivery(d: Delivery) {
@@ -77,6 +86,13 @@ export default function DeliveriesPage() {
       <div className="space-y-3">
         {deliveries.map(d => {
           const flagged = d.items.filter(i => i.isFlagged);
+          const linkedPO = d.shipment?.items[0]?.po;
+          const statusColor: Record<string, string> = {
+            pending: "bg-amber-100 text-amber-700",
+            partial: "bg-blue-100 text-blue-700",
+            complete: "bg-green-100 text-green-700",
+            disputed: "bg-red-100 text-red-700",
+          };
           return (
             <div key={d.id} className="card p-5">
               <div className="flex items-start justify-between">
@@ -85,9 +101,16 @@ export default function DeliveriesPage() {
                     {flagged.length > 0 ? <AlertTriangle size={20} /> : <PackageCheck size={20} />}
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-gray-900">{d.shipment?.shipmentNumber ?? "Delivery"}</h3>
-                      <span className={`badge-${d.status}`}>{d.status}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-semibold text-gray-900">
+                        {linkedPO
+                          ? <a href={`/dashboard/purchase-orders/${linkedPO.id}`} className="text-brand-600 hover:underline" onClick={e => e.stopPropagation()}>{linkedPO.poNumber}</a>
+                          : (d.shipment?.shipmentNumber ?? "Delivery")}
+                      </h3>
+                      {linkedPO?.productName && <span className="text-sm text-gray-500">{linkedPO.productName}</span>}
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusColor[d.status] ?? "bg-gray-100 text-gray-600"}`}>
+                        {d.status}
+                      </span>
                     </div>
                     <div className="text-sm text-gray-500 mt-1 flex items-center gap-3">
                       {d.outlet && <span>{d.outlet.name} ({d.outlet.marking})</span>}
@@ -95,7 +118,7 @@ export default function DeliveriesPage() {
                       <span>Received: {formatDate(d.receivedAt)}</span>
                     </div>
                     <div className="text-xs text-gray-400 mt-1">
-                      {d.items.length} items · {flagged.length > 0 ? <span className="text-red-600 font-medium">{flagged.length} flagged</span> : <span className="text-green-600">All OK</span>}
+                      {d.items.length} colour{d.items.length !== 1 ? "s" : ""} · {flagged.length > 0 ? <span className="text-red-600 font-medium">{flagged.length} flagged</span> : <span className="text-green-600">All OK</span>}
                     </div>
                   </div>
                 </div>
@@ -122,7 +145,7 @@ export default function DeliveriesPage() {
       {selected && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="card w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
-            <h2 className="text-lg font-semibold mb-1">QC Entry — {selected.shipment?.shipmentNumber}</h2>
+            <h2 className="text-lg font-semibold mb-1">QC Entry — {selected.shipment?.items[0]?.po?.poNumber ?? selected.shipment?.shipmentNumber ?? "Delivery"}</h2>
             <p className="text-sm text-gray-500 mb-4">Record actual quantities received. Flag discrepancies to generate a report.</p>
 
             <div className="overflow-x-auto">

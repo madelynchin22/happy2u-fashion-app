@@ -1,8 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
 import { CreditCard, AlertTriangle, Clock, CheckCircle, BadgeCheck } from "lucide-react";
+import { POTabs } from "@/components/layout/POTabs";
 
 const PAYMENT_DAYS = 30;
+const DEFAULT_FX = 0.62;
+
+type BatchSku = { h2uSku: string | null; colorName: string | null; pairs: number };
+type Batch = { shipDate: string; pairs: number; price: number; skus: BatchSku[] };
 
 type POPayment = {
   id: string;
@@ -10,7 +15,6 @@ type POPayment = {
   productName: string | null;
   brand: string | null;
   status: string;
-  shipDate: string;
   paymentPaidDate: string | null;
   totalPrice: number | null;
   totalPairs: number;
@@ -19,6 +23,7 @@ type POPayment = {
   paymentTerms: string | null;
   paymentIncoterm: string | null;
   manufacturer: { id: string; name: string };
+  batches: Batch[];
 };
 
 function daysLeft(shipDate: string): number {
@@ -46,6 +51,13 @@ function urgency(days: number): Urgency {
   return "ok";
 }
 
+// Most urgent batch across all batches in a PO
+function poUrgency(po: POPayment): Urgency {
+  const days = po.batches.map(b => daysLeft(b.shipDate));
+  const min = Math.min(...days);
+  return urgency(min);
+}
+
 const URGENCY_ROW: Record<Urgency, string> = {
   overdue: "bg-red-50 border-l-4 border-l-red-500",
   urgent:  "bg-orange-50 border-l-4 border-l-orange-400",
@@ -60,15 +72,21 @@ const URGENCY_BADGE: Record<Urgency, string> = {
   ok:      "bg-green-100 text-green-700",
 };
 
-const URGENCY_LABEL: Record<Urgency, string> = {
-  overdue: "Overdue",
-  urgent:  "Due soon",
-  soon:    "Upcoming",
-  ok:      "On track",
-};
+function batchRm(batch: Batch, po: POPayment): number {
+  return po.currency === "RMB" ? batch.price * (po.fxRate ?? DEFAULT_FX) : batch.price;
+}
+
+function skuLabel(skus: BatchSku[]): string {
+  return skus.map(s => {
+    const sku = s.h2uSku?.match(/^(S\d+)/i)?.[1] ?? s.h2uSku ?? "";
+    const col = s.colorName ?? "";
+    const label = [sku, col].filter(Boolean).join(" ");
+    return label ? `${label} ×${s.pairs}` : `×${s.pairs}`;
+  }).join(" · ");
+}
 
 export default function PaymentTrackingPage() {
-  const [pos, setPos]       = useState<POPayment[]>([]);
+  const [pos, setPos]         = useState<POPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [marking, setMarking] = useState<string | null>(null);
   const [showPaid, setShowPaid] = useState(false);
@@ -102,28 +120,24 @@ export default function PaymentTrackingPage() {
     load();
   }
 
-  // Enrich with days left and sort by urgency (paid last)
-  const enriched = pos
-    .map(p => ({ ...p, days: daysLeft(p.shipDate), urg: urgency(daysLeft(p.shipDate)) }))
-    .sort((a, b) => {
-      if (!!a.paymentPaidDate !== !!b.paymentPaidDate) return a.paymentPaidDate ? 1 : -1;
-      return a.days - b.days;
-    });
+  const unpaid = pos.filter(p => !p.paymentPaidDate);
+  const paid   = pos.filter(p =>  p.paymentPaidDate);
 
-  const unpaid = enriched.filter(p => !p.paymentPaidDate);
-  const paid   = enriched.filter(p =>  p.paymentPaidDate);
+  // Sort unpaid by most-urgent batch first
+  const sortedUnpaid = [...unpaid].sort((a, b) => {
+    const aMin = Math.min(...a.batches.map(b => daysLeft(b.shipDate)));
+    const bMin = Math.min(...b.batches.map(b => daysLeft(b.shipDate)));
+    return aMin - bMin;
+  });
 
-  // Summary counts (only unpaid)
-  const overdue = unpaid.filter(p => p.urg === "overdue").length;
-  const urgent  = unpaid.filter(p => p.urg === "urgent").length;
-  const totalDue = unpaid.reduce((s, p) => {
-    const rmAmt = p.currency === "RMB" && p.fxRate ? (p.totalPrice ?? 0) / p.fxRate : (p.totalPrice ?? 0);
-    return s + rmAmt;
-  }, 0);
+  // Summary
+  const overdueCount = unpaid.filter(p => poUrgency(p) === "overdue").length;
+  const urgentCount  = unpaid.filter(p => poUrgency(p) === "urgent").length;
+  const totalDueRm   = unpaid.reduce((s, p) =>
+    s + p.batches.reduce((bs, b) => bs + batchRm(b, p), 0), 0);
 
-  // Group by supplier
   // Group unpaid by supplier
-  const bySupplier = unpaid.reduce<Record<string, typeof unpaid>>((acc, p) => {
+  const bySupplier = sortedUnpaid.reduce<Record<string, POPayment[]>>((acc, p) => {
     const key = p.manufacturer.name;
     if (!acc[key]) acc[key] = [];
     acc[key].push(p);
@@ -132,7 +146,8 @@ export default function PaymentTrackingPage() {
 
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-6">
-      {/* Header */}
+      <POTabs />
+
       <div>
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <CreditCard size={20} className="text-brand-600" />
@@ -144,22 +159,22 @@ export default function PaymentTrackingPage() {
       </div>
 
       {/* Summary cards */}
-      {!loading && enriched.length > 0 && (
+      {!loading && pos.length > 0 && (
         <div className="grid grid-cols-3 gap-4">
-          <div className={`rounded-xl border p-4 ${overdue > 0 ? "border-red-200 bg-red-50" : "border-gray-100 bg-white"}`}>
+          <div className={`rounded-xl border p-4 ${overdueCount > 0 ? "border-red-200 bg-red-50" : "border-gray-100 bg-white"}`}>
             <div className="flex items-center gap-2 mb-1">
-              <AlertTriangle size={15} className={overdue > 0 ? "text-red-500" : "text-gray-300"} />
+              <AlertTriangle size={15} className={overdueCount > 0 ? "text-red-500" : "text-gray-300"} />
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Overdue</span>
             </div>
-            <p className={`text-2xl font-bold ${overdue > 0 ? "text-red-600" : "text-gray-300"}`}>{overdue}</p>
+            <p className={`text-2xl font-bold ${overdueCount > 0 ? "text-red-600" : "text-gray-300"}`}>{overdueCount}</p>
             <p className="text-xs text-gray-400 mt-0.5">past payment due date</p>
           </div>
-          <div className={`rounded-xl border p-4 ${urgent > 0 ? "border-orange-200 bg-orange-50" : "border-gray-100 bg-white"}`}>
+          <div className={`rounded-xl border p-4 ${urgentCount > 0 ? "border-orange-200 bg-orange-50" : "border-gray-100 bg-white"}`}>
             <div className="flex items-center gap-2 mb-1">
-              <Clock size={15} className={urgent > 0 ? "text-orange-500" : "text-gray-300"} />
+              <Clock size={15} className={urgentCount > 0 ? "text-orange-500" : "text-gray-300"} />
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Due within 7 days</span>
             </div>
-            <p className={`text-2xl font-bold ${urgent > 0 ? "text-orange-600" : "text-gray-300"}`}>{urgent}</p>
+            <p className={`text-2xl font-bold ${urgentCount > 0 ? "text-orange-600" : "text-gray-300"}`}>{urgentCount}</p>
             <p className="text-xs text-gray-400 mt-0.5">require immediate attention</p>
           </div>
           <div className="rounded-xl border border-gray-100 bg-white p-4">
@@ -167,17 +182,15 @@ export default function PaymentTrackingPage() {
               <CheckCircle size={15} className="text-brand-500" />
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total outstanding</span>
             </div>
-            <p className="text-2xl font-bold text-gray-800">RM {Math.round(totalDue).toLocaleString()}</p>
+            <p className="text-2xl font-bold text-gray-800">RM {Math.round(totalDueRm).toLocaleString()}</p>
             <p className="text-xs text-gray-400 mt-0.5">{unpaid.length} PO{unpaid.length !== 1 ? "s" : ""} pending payment</p>
           </div>
         </div>
       )}
 
-      {loading && (
-        <div className="text-center py-16 text-gray-400 text-sm">Loading…</div>
-      )}
+      {loading && <div className="text-center py-16 text-gray-400 text-sm">Loading…</div>}
 
-      {!loading && enriched.length === 0 && (
+      {!loading && pos.length === 0 && (
         <div className="border border-dashed border-gray-200 rounded-xl p-16 text-center">
           <CreditCard size={32} className="mx-auto text-gray-200 mb-3" />
           <p className="text-sm text-gray-400">No payments to track</p>
@@ -192,21 +205,18 @@ export default function PaymentTrackingPage() {
         </div>
       )}
 
-      {/* Table grouped by supplier */}
-      {!loading && Object.entries(bySupplier).map(([supplierName, rows]) => {
-        const supplierTotal = rows.reduce((s, p) => {
-          const rm = p.currency === "RMB" && p.fxRate ? (p.totalPrice ?? 0) / p.fxRate : (p.totalPrice ?? 0);
-          return s + rm;
-        }, 0);
-        const mostUrgent = rows[0].urg;
+      {/* Unpaid — grouped by supplier */}
+      {!loading && Object.entries(bySupplier).map(([supplierName, poList]) => {
+        const supplierTotalRm = poList.reduce((s, p) =>
+          s + p.batches.reduce((bs, b) => bs + batchRm(b, p), 0), 0);
+        const mostUrgent = poList[0] ? poUrgency(poList[0]) : "ok";
 
         return (
           <div key={supplierName} className="border border-gray-200 rounded-xl overflow-hidden">
-            {/* Supplier header */}
             <div className="bg-gray-50 px-5 py-3 flex items-center justify-between border-b border-gray-100">
               <div className="flex items-center gap-3">
                 <span className="font-bold text-sm text-gray-900">{supplierName}</span>
-                <span className="text-xs text-gray-400">{rows.length} PO{rows.length !== 1 ? "s" : ""}</span>
+                <span className="text-xs text-gray-400">{poList.length} PO{poList.length !== 1 ? "s" : ""}</span>
                 {mostUrgent === "overdue" && (
                   <span className="text-[11px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold">Has overdue</span>
                 )}
@@ -215,70 +225,89 @@ export default function PaymentTrackingPage() {
                 )}
               </div>
               <span className="text-sm font-semibold text-gray-700">
-                RM {Math.round(supplierTotal).toLocaleString()} total
+                RM {Math.round(supplierTotalRm).toLocaleString()} total
               </span>
             </div>
 
-            {/* PO rows */}
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase tracking-wide">
-                  <th className="text-left px-5 py-2 w-36">PO Number</th>
-                  <th className="text-left px-3 py-2">Product</th>
+                  <th className="text-left px-5 py-2 w-28">PO</th>
+                  <th className="text-left px-3 py-2">Shipped items</th>
                   <th className="text-center px-3 py-2 w-24">Ship Date</th>
                   <th className="text-center px-3 py-2 w-28">Payment Due</th>
-                  <th className="text-center px-3 py-2 w-28">Days Left</th>
-                  <th className="text-right px-5 py-2 w-32">Amount (RM)</th>
+                  <th className="text-center px-3 py-2 w-24">Days Left</th>
+                  <th className="text-right px-5 py-2 w-32">Amount</th>
                   <th className="text-left px-3 py-2 w-28">Terms</th>
-                  <th className="text-center px-3 py-2 w-28">Payment</th>
+                  <th className="text-center px-3 py-2 w-24">Payment</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {rows.map(p => {
-                  const rmAmt = p.currency === "RMB" && p.fxRate
-                    ? (p.totalPrice ?? 0) / p.fxRate
-                    : (p.totalPrice ?? 0);
-                  const urg = p.urg;
-                  return (
-                    <tr key={p.id} className={`${URGENCY_ROW[urg]} transition-colors`}>
-                      <td className="px-5 py-3">
-                        <span className="font-mono font-semibold text-xs text-gray-800">{p.poNumber}</span>
-                      </td>
-                      <td className="px-3 py-3">
-                        <p className="font-medium text-gray-800 text-xs">{p.productName ?? "—"}</p>
-                        {p.brand && <p className="text-[11px] text-gray-400">{p.brand} · {p.totalPairs} pairs</p>}
-                      </td>
-                      <td className="px-3 py-3 text-center text-xs text-gray-500">{fmt(p.shipDate)}</td>
-                      <td className="px-3 py-3 text-center text-xs font-medium text-gray-700">{dueDate(p.shipDate)}</td>
-                      <td className="px-3 py-3 text-center">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${URGENCY_BADGE[urg]}`}>
-                          {urg === "overdue"
-                            ? `${Math.abs(p.days)}d overdue`
-                            : p.days === 0
-                            ? "Due today"
-                            : `${p.days}d left`}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-right text-xs font-semibold text-gray-800">
-                        {rmAmt > 0 ? `RM ${Math.round(rmAmt).toLocaleString()}` : "—"}
-                        {p.currency === "RMB" && p.totalPrice && (
-                          <p className="text-[11px] text-gray-400 font-normal">¥{p.totalPrice.toLocaleString()}</p>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-xs text-gray-400 max-w-[120px] truncate">
-                        {p.paymentTerms ?? "—"}
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <button
-                          onClick={() => markPaid(p.id)}
-                          disabled={marking === p.id}
-                          className="text-[11px] px-2.5 py-1 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
-                        >
-                          {marking === p.id ? "…" : "Mark Paid"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
+                {poList.map(po => {
+                  const isPartial = po.batches.reduce((s, b) => s + b.pairs, 0) < po.totalPairs;
+                  return po.batches.map((batch, bIdx) => {
+                    const days = daysLeft(batch.shipDate);
+                    const urg  = urgency(days);
+                    const rmAmt = batchRm(batch, po);
+                    const isFirst = bIdx === 0;
+                    const isLast  = bIdx === po.batches.length - 1;
+                    return (
+                      <tr key={`${po.id}-${batch.shipDate}`} className={`${URGENCY_ROW[urg]} transition-colors`}>
+                        <td className="px-5 py-3 align-top">
+                          {isFirst && (
+                            <>
+                              <span className="font-mono font-semibold text-xs text-gray-800">{po.poNumber}</span>
+                              {isPartial && po.batches.length === 1 && (
+                                <p className="text-[10px] text-amber-600 mt-0.5">
+                                  {po.batches[0].pairs}/{po.totalPairs} pairs
+                                </p>
+                              )}
+                              {po.batches.length > 1 && (
+                                <p className="text-[10px] text-blue-500 mt-0.5">{po.batches.length} batches</p>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <td className="px-3 py-3">
+                          <p className="text-xs text-gray-700 font-medium">{skuLabel(batch.skus)}</p>
+                          {po.productName && isFirst && (
+                            <p className="text-[11px] text-gray-400">{po.productName}{po.brand ? ` · ${po.brand}` : ""}</p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-center text-xs text-gray-500">{fmt(batch.shipDate)}</td>
+                        <td className="px-3 py-3 text-center text-xs font-medium text-gray-700">{dueDate(batch.shipDate)}</td>
+                        <td className="px-3 py-3 text-center">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${URGENCY_BADGE[urg]}`}>
+                            {urg === "overdue"
+                              ? `${Math.abs(days)}d overdue`
+                              : days === 0
+                              ? "Due today"
+                              : `${days}d left`}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-right text-xs font-semibold text-gray-800 align-top">
+                          RM {Math.round(rmAmt).toLocaleString()}
+                          {po.currency === "RMB" && (
+                            <p className="text-[11px] text-gray-400 font-normal">¥{Math.round(batch.price).toLocaleString()}</p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-xs text-gray-400 max-w-[120px] truncate align-top">
+                          {isFirst ? (po.paymentTerms ?? "—") : ""}
+                        </td>
+                        <td className="px-3 py-3 text-center align-top">
+                          {isFirst && (
+                            <button
+                              onClick={() => markPaid(po.id)}
+                              disabled={marking === po.id}
+                              className="text-[11px] px-2.5 py-1 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
+                            >
+                              {marking === po.id ? "…" : "Mark Paid"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
                 })}
               </tbody>
             </table>
@@ -286,7 +315,7 @@ export default function PaymentTrackingPage() {
         );
       })}
 
-      {/* Paid / Settled section */}
+      {/* Settled / Paid section */}
       {!loading && paid.length > 0 && (
         <div>
           <button
@@ -307,40 +336,41 @@ export default function PaymentTrackingPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-green-50 text-xs text-gray-400 uppercase tracking-wide">
-                    <th className="text-left px-5 py-2 w-36">PO Number</th>
+                    <th className="text-left px-5 py-2 w-28">PO</th>
                     <th className="text-left px-3 py-2">Product</th>
                     <th className="text-left px-3 py-2">Supplier</th>
                     <th className="text-center px-3 py-2 w-24">Ship Date</th>
                     <th className="text-center px-3 py-2 w-28">Paid On</th>
-                    <th className="text-right px-5 py-2 w-32">Amount (RM)</th>
-                    <th className="text-center px-3 py-2 w-20"></th>
+                    <th className="text-right px-5 py-2 w-32">Amount</th>
+                    <th className="text-center px-3 py-2 w-16"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-green-50">
-                  {paid.map(p => {
-                    const rmAmt = p.currency === "RMB" && p.fxRate
-                      ? (p.totalPrice ?? 0) / p.fxRate
-                      : (p.totalPrice ?? 0);
+                  {paid.map(po => {
+                    const totalRm = po.batches.reduce((s, b) => s + batchRm(b, po), 0);
+                    const earliestShip = po.batches[0]?.shipDate;
                     return (
-                      <tr key={p.id} className="bg-white hover:bg-green-50/30 transition-colors">
+                      <tr key={po.id} className="bg-white hover:bg-green-50/30 transition-colors">
                         <td className="px-5 py-2.5">
-                          <span className="font-mono text-xs text-gray-500">{p.poNumber}</span>
+                          <span className="font-mono text-xs text-gray-500">{po.poNumber}</span>
                         </td>
-                        <td className="px-3 py-2.5 text-xs text-gray-500">{p.productName ?? "—"}</td>
-                        <td className="px-3 py-2.5 text-xs text-gray-500">{p.manufacturer.name}</td>
-                        <td className="px-3 py-2.5 text-center text-xs text-gray-400">{fmt(p.shipDate)}</td>
+                        <td className="px-3 py-2.5 text-xs text-gray-500">{po.productName ?? "—"}</td>
+                        <td className="px-3 py-2.5 text-xs text-gray-500">{po.manufacturer.name}</td>
+                        <td className="px-3 py-2.5 text-center text-xs text-gray-400">
+                          {earliestShip ? fmt(earliestShip) : "—"}
+                        </td>
                         <td className="px-3 py-2.5 text-center">
                           <span className="inline-flex items-center gap-1 text-xs text-green-700 font-medium">
-                            <BadgeCheck size={11} /> {fmt(p.paymentPaidDate!)}
+                            <BadgeCheck size={11} /> {fmt(po.paymentPaidDate!)}
                           </span>
                         </td>
                         <td className="px-5 py-2.5 text-right text-xs text-gray-500">
-                          {rmAmt > 0 ? `RM ${Math.round(rmAmt).toLocaleString()}` : "—"}
+                          RM {Math.round(totalRm).toLocaleString()}
                         </td>
                         <td className="px-3 py-2.5 text-center">
                           <button
-                            onClick={() => unmarkPaid(p.id)}
-                            disabled={marking === p.id}
+                            onClick={() => unmarkPaid(po.id)}
+                            disabled={marking === po.id}
                             className="text-[11px] text-gray-300 hover:text-red-400 transition-colors disabled:opacity-50"
                             title="Undo paid"
                           >

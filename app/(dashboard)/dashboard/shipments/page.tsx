@@ -23,29 +23,28 @@ function detectMode(s: Shipment): "air" | "sea" {
   return "sea";
 }
 
-function daysLate(s: Shipment): number | null {
+function daysLate(s: Shipment, now: Date): number | null {
   if (!s.estimatedArrival) return null;
   const eta = new Date(s.estimatedArrival);
   if (s.status === "delivered" && s.actualArrival) {
     return Math.round(differenceInDays(new Date(s.actualArrival), eta));
   }
   if (s.status !== "delivered") {
-    const d = differenceInDays(new Date(), eta);
-    return d;
+    return differenceInDays(now, eta);
   }
   return null;
 }
 
-function isDelayed(s: Shipment): boolean {
-  const late = daysLate(s);
+function isDelayed(s: Shipment, now: Date): boolean {
+  const late = daysLate(s, now);
   return late != null && late > 0 && s.status !== "delivered";
 }
 
-function isArrivingThisWeek(s: Shipment): boolean {
+function isArrivingThisWeek(s: Shipment, now: Date): boolean {
   if (!s.estimatedArrival) return false;
   if (!["in_transit","customs"].includes(s.status)) return false;
   const eta = new Date(s.estimatedArrival);
-  return isWithinInterval(eta, { start: new Date(), end: addDays(new Date(), 7) });
+  return isWithinInterval(eta, { start: now, end: addDays(now, 7) });
 }
 
 const STATUS_PILL: Record<string, string> = {
@@ -88,6 +87,12 @@ function fmtShort(d?: string) {
   return format(new Date(d), "dd/MM");
 }
 
+function isBatch(s: Shipment) { return s.shipmentNumber.startsWith("BATCH-"); }
+function batchLabel(s: Shipment) {
+  const dateStr = s.shipmentNumber.replace("BATCH-", "");
+  return `${format(new Date(dateStr), "dd MMM yyyy")} Batch`;
+}
+
 function trackingUrl(s: Shipment): string | null {
   const ves = (s.vesselName ?? "").toLowerCase();
   const trk = s.blNumber ?? s.containerNumber ?? "";
@@ -108,22 +113,33 @@ export default function ShipmentsPage() {
   const [outlets, setOutlets]     = useState<{id:string;name:string;marking:string}[]>([]);
   const [pos, setPos]             = useState<{id:string;poNumber:string}[]>([]);
   const [saving, setSaving]       = useState(false);
+  const [now, setNow]             = useState(() => new Date());
   const [form, setForm]           = useState({
     containerNumber:"", vesselName:"", blNumber:"", portOrigin:"", portDestination:"",
     shipDate:"", estimatedArrival:"", destinationId:"", notes:"", poIds:[] as string[],
   });
 
-  useEffect(() => {
+  function loadShipments() {
     fetch("/api/shipments").then(r => r.json()).then(setShipments).catch(() => {});
+  }
+
+  useEffect(() => {
+    loadShipments();
     fetch("/api/outlets").then(r => r.json()).then(setOutlets).catch(() => {});
     fetch("/api/purchase-orders").then(r => r.json()).then(setPos).catch(() => {});
+
+    // Tick every minute so days-late counters stay accurate
+    const tick = setInterval(() => setNow(new Date()), 60_000);
+    // Refresh shipment data every 5 minutes
+    const poll = setInterval(loadShipments, 300_000);
+    return () => { clearInterval(tick); clearInterval(poll); };
   }, []);
 
   const inTransit       = shipments.filter(s => s.status === "in_transit").length;
   const awaitingPickup  = shipments.filter(s => s.status === "preparing").length;
-  const arrivingWeek    = shipments.filter(isArrivingThisWeek).length;
-  const delayedList     = shipments.filter(isDelayed);
-  const deliveredOnTime = shipments.filter(s => s.status === "delivered" && (daysLate(s) ?? 0) <= 0).length;
+  const arrivingWeek    = shipments.filter(s => isArrivingThisWeek(s, now)).length;
+  const delayedList     = shipments.filter(s => isDelayed(s, now));
+  const deliveredOnTime = shipments.filter(s => s.status === "delivered" && (daysLate(s, now) ?? 0) <= 0).length;
   const totalDelivered  = shipments.filter(s => s.status === "delivered").length;
   const onTimeRate      = totalDelivered > 0 ? Math.round(deliveredOnTime / totalDelivered * 100) : 0;
 
@@ -132,11 +148,11 @@ export default function ShipmentsPage() {
     if (filter === "in_transit") return s.status === "in_transit";
     if (filter === "customs")   return s.status === "customs";
     if (filter === "delivered") return s.status === "delivered";
-    if (filter === "delayed")   return isDelayed(s);
+    if (filter === "delayed")   return isDelayed(s, now);
     if (modeFilter === "air")   return detectMode(s) === "air";
     if (modeFilter === "sea")   return detectMode(s) === "sea";
     return true;
-  }), [shipments, filter, modeFilter]);
+  }), [shipments, filter, modeFilter, now]);
 
   async function save() {
     setSaving(true);
@@ -152,16 +168,24 @@ export default function ShipmentsPage() {
     }
   }
 
-  async function markDelivered(s: Shipment) {
+  async function updateStatus(s: Shipment, status: string) {
+    const extra = status === "delivered" ? { actualArrival: new Date().toISOString() } : {};
     await fetch(`/api/shipments/${s.id}`, {
       method:"PATCH", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ status:"delivered", actualArrival: new Date().toISOString() }),
+      body: JSON.stringify({ status, ...extra }),
     });
     fetch("/api/shipments").then(r => r.json()).then(d => { setShipments(d); setSelected(d.find((x: Shipment) => x.id === s.id) ?? null); });
   }
 
+  const STATUS_NEXT: Record<string, { status: string; label: string }[]> = {
+    preparing:  [{ status: "in_transit", label: "Mark in transit" }],
+    in_transit: [{ status: "customs",    label: "Mark at customs" }, { status: "arrived", label: "Mark arrived" }],
+    customs:    [{ status: "arrived",    label: "Mark arrived" }],
+    arrived:    [{ status: "delivered",  label: "Mark delivered" }],
+  };
+
   const selMode = selected ? detectMode(selected) : "sea";
-  const selLate = selected ? daysLate(selected) : null;
+  const selLate = selected ? daysLate(selected, now) : null;
   const selStep = selected ? currentStep(selected.status) : 0;
   const selTrack = selected ? trackingUrl(selected) : null;
 
@@ -210,7 +234,7 @@ export default function ShipmentsPage() {
           </p>
           <p className="text-xs text-gray-400 mt-1">
             {delayedList.length > 0
-              ? `${delayedList[0].shipmentNumber} · ${daysLate(delayedList[0])} days`
+              ? `${delayedList[0].shipmentNumber} · ${daysLate(delayedList[0], now)} days`
               : "All on schedule"}
           </p>
         </div>
@@ -261,35 +285,42 @@ export default function ShipmentsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
-                {["SHIPMENT ID","LINKED PO","PRODUCT","MODE","CARRIER · TRACKING","SHIP DATE","ETA","STATUS","DAYS LATE"].map(h => (
+                {["LINKED PO","PRODUCT","MODE","CARRIER · TRACKING","SHIP DATE","ETA","STATUS","DAYS LATE"].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold tracking-widest text-gray-400 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filtered.map(s => {
-                const late   = daysLate(s);
+                const late   = daysLate(s, now);
                 const mode   = detectMode(s);
-                const po     = s.items[0]?.po;
                 const isSelected = selected?.id === s.id;
+                const batch  = isBatch(s);
+                const totalPairs = s.items.reduce((t, i) => t + (i.totalPairs ?? 0), 0);
+                const poNumbers  = s.items.map(i => i.po.poNumber);
+                const manufacturers = [...new Set(s.items.map(i => i.po.manufacturer?.name).filter(Boolean))];
                 return (
                   <tr key={s.id} onClick={() => setSelected(isSelected ? null : s)}
                     className={`cursor-pointer transition-colors ${isSelected ? "bg-gray-50" : "hover:bg-gray-50"}`}>
-                    <td className="px-4 py-3.5 font-mono text-xs font-semibold text-gray-900 whitespace-nowrap">
-                      {s.shipmentNumber}
-                    </td>
                     <td className="px-4 py-3.5">
-                      {po ? (
-                        <span className="text-brand-600 text-xs font-medium flex items-center gap-0.5">
-                          {po.poNumber} <ArrowUpRight size={10} />
-                        </span>
+                      {poNumbers.length > 0 ? (
+                        <div className="flex flex-col gap-0.5">
+                          {poNumbers.map(pn => (
+                            <span key={pn} className="text-brand-600 text-xs font-medium flex items-center gap-0.5">
+                              {pn} <ArrowUpRight size={10} />
+                            </span>
+                          ))}
+                        </div>
                       ) : "—"}
                     </td>
                     <td className="px-4 py-3.5">
-                      <p className="font-medium text-gray-900 whitespace-nowrap">{po?.productName ?? "—"}</p>
+                      {batch
+                        ? <p className="font-medium text-gray-900 whitespace-nowrap">{batchLabel(s)}</p>
+                        : <p className="font-medium text-gray-900 whitespace-nowrap">{s.items[0]?.po.productName ?? "—"}</p>
+                      }
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {s.items.reduce((t, i) => t + (i.totalPairs ?? 0), 0) || (po as any)?.totalPairs || 0} pairs
-                        {po?.manufacturer?.name ? ` · ${po.manufacturer.name}` : ""}
+                        {totalPairs} pairs
+                        {manufacturers.length > 0 ? ` · ${manufacturers.join(", ")}` : ""}
                       </p>
                     </td>
                     <td className="px-4 py-3.5">
@@ -330,17 +361,19 @@ export default function ShipmentsPage() {
       )}
 
       {selected && (() => {
-        const po   = selected.items[0]?.po;
         const late = selLate;
         const isLate = late != null && late > 0 && selected.status !== "delivered";
         const isCustoms = selected.status === "customs";
+        const batch = isBatch(selected);
+        const selPoNumbers = selected.items.map(i => i.po.poNumber);
+        const selLabel = batch ? batchLabel(selected) : (selected.items[0]?.po.productName ?? "Shipment");
         return (
           <div className="card p-5 space-y-5">
             {/* Detail header */}
             <div className="flex items-start justify-between flex-wrap gap-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="font-bold text-gray-900 text-lg">{selected.shipmentNumber} · {po?.productName ?? "Shipment"}</h2>
+                  <h2 className="font-bold text-gray-900 text-lg">{selected.shipmentNumber} · {selLabel}</h2>
                   {isCustoms && (
                     <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 flex items-center gap-1">
                       <AlertTriangle size={10} /> Customs hold
@@ -353,9 +386,11 @@ export default function ShipmentsPage() {
                   )}
                 </div>
                 <p className="text-sm text-gray-500 mt-1">
-                  {po && <span>From <span className="text-brand-600">{po.poNumber} ↗</span> · </span>}
-                  {selected.items.reduce((t, i) => t + (i.totalPairs ?? 0), 0) || (po as any)?.totalPairs || 0} pairs
-                  {po?.manufacturer?.name ? ` · supplier ${po.manufacturer.name}` : ""}
+                  {selPoNumbers.length > 0 && (
+                    <span className="text-brand-600">{selPoNumbers.join(" · ")} ↗ · </span>
+                  )}
+                  {selected.items.reduce((t, i) => t + (i.totalPairs ?? 0), 0)} pairs
+                  {[...new Set(selected.items.map(i => i.po.manufacturer?.name).filter(Boolean))].map(n => ` · ${n}`)}
                 </p>
               </div>
               <div className="flex gap-2 shrink-0">
@@ -365,12 +400,12 @@ export default function ShipmentsPage() {
                     Track with carrier <ArrowUpRight size={12} />
                   </a>
                 )}
-                {selected.status !== "delivered" && (
-                  <button onClick={() => markDelivered(selected)}
+                {(STATUS_NEXT[selected.status] ?? []).map(n => (
+                  <button key={n.status} onClick={() => updateStatus(selected, n.status)}
                     className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                    Mark delivered
+                    {n.label}
                   </button>
-                )}
+                ))}
               </div>
             </div>
 

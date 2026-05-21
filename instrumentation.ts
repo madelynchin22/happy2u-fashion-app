@@ -3,6 +3,13 @@
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Warm up Prisma so the first API call doesn't pay cold-start penalty
+    try {
+      const { prisma } = await import("@/lib/db");
+      await prisma.$queryRaw`SELECT 1`;
+      console.log("[startup] Prisma connection warmed up");
+    } catch { /* non-fatal */ }
+
     const cron = await import("node-cron");
 
     // Daily at 18:00 UTC = 02:00 AM MYT
