@@ -10,6 +10,8 @@ import React from "react";
 
 async function toDataUri(url: string | null | undefined): Promise<string | null> {
   if (!url) return null;
+  // Already a data URL — return as-is (base64-encoded uploads)
+  if (url.startsWith("data:")) return url;
   try {
     let input: string | Buffer;
     if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -70,10 +72,13 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     }
   }
 
-  // ── Vendor assets (shoe box + logo) by brand ──
+  // ── Vendor assets (shoe box + logo) ──
+  // Primary key: manufacturer name (e.g. "Nancy", "Anna") — set in Settings > Shoe Box Design
+  // Fallback key: item brand (e.g. "BlissFit", "Happy2U") — for logo and brand-level assets
   const rawItems: any[] = poRaw.items ?? [];
+  const manufacturerName = poRaw.manufacturer?.name ?? null;
 
-  // Resolve brand: use item.brand first, then fall back to ProductLibrary
+  // Resolve item brand from ProductLibrary for logo fallback
   const skusNeedingBrand = rawItems.filter(i => !i.brand && i.h2uSku).map(i => i.h2uSku as string);
   const libBrands = skusNeedingBrand.length
     ? await prisma.productLibrary.findMany({
@@ -83,14 +88,15 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     : [];
   const h2uToBrand = new Map(libBrands.map((l: any) => [l.h2uSku, l.brand]));
 
-  const brandSet = new Set<string>();
+  const vendorKeySet = new Set<string>();
+  if (manufacturerName) vendorKeySet.add(manufacturerName);
   for (const item of rawItems) {
     const brand = item.brand ?? (item.h2uSku ? h2uToBrand.get(item.h2uSku) : null);
-    if (brand) brandSet.add(brand);
+    if (brand) vendorKeySet.add(brand);
   }
 
-  const vendorAssets = brandSet.size
-    ? await prisma.vendorAsset.findMany({ where: { vendor: { in: [...brandSet] } } })
+  const vendorAssets = vendorKeySet.size
+    ? await prisma.vendorAsset.findMany({ where: { vendor: { in: [...vendorKeySet] } } })
     : [];
 
   const vendorUriMap = new Map<string, { boxUri: string | null; logoUri: string | null }>();
@@ -104,6 +110,9 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     })
   );
 
+  // Manufacturer-level assets take priority for box design; item brand used for logo
+  const mfgAssets = manufacturerName ? vendorUriMap.get(manufacturerName) : null;
+
   // ── Build enriched PO ──
   const po = {
     ...poRaw,
@@ -115,15 +124,16 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
       const mainSku     = (colorKey ? mainSkuMap.get(colorKey)   : null) ?? item.mainSku   ?? null;
       const colorCode   = (colorKey ? colorCodeMap.get(colorKey) : null) ?? item.colorCode ?? null;
       const brand       = item.brand ?? (item.h2uSku ? h2uToBrand.get(item.h2uSku) : null) ?? null;
-      const assets      = brand ? vendorUriMap.get(brand) : null;
+      const brandAssets = brand ? vendorUriMap.get(brand) : null;
       return {
         ...item,
         photoUrl:      colourUri ?? mainPhotoUri,
         mainSku,
         colorCode,
         brand,
-        boxDesignUri:  assets?.boxUri  ?? null,
-        logoDesignUri: assets?.logoUri ?? null,
+        // Box design: manufacturer-level first, then brand-level fallback
+        boxDesignUri:  mfgAssets?.boxUri  ?? brandAssets?.boxUri  ?? null,
+        logoDesignUri: mfgAssets?.logoUri ?? brandAssets?.logoUri ?? null,
       };
     })),
   };

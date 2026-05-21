@@ -3,8 +3,10 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Save, Plus, Trash2, Edit2, X, Upload, Trash } from "lucide-react";
 
-const VENDORS = ["Belle", "BlissFit", "Bunny", "Fashion Bag", "Happy2U", "La Dolce Vita", "Latex", "Mary Jane"] as const;
+// Logo brands — static list of product sub-brands used on shoe logos
+const LOGO_VENDORS = ["Belle", "BlissFit", "Bunny", "Fashion Bag", "Happy2U", "La Dolce Vita", "Latex", "Mary Jane"] as const;
 type VendorAsset = { id: string; vendor: string; assetType: string; imageUrl: string };
+type Manufacturer = { id: string; name: string };
 
 type Outlet = { id: string; name: string; marking: string; country: string; address?: string; isHQ: boolean };
 type User   = { id: string; name?: string; email: string; role: string; outletId?: string };
@@ -21,9 +23,10 @@ export default function SettingsPage() {
   const [newRate, setNewRate] = useState("0.62");
   const [saving, setSaving]   = useState(false);
 
-  const [vendorAssets, setVendorAssets] = useState<VendorAsset[]>([]);
-  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
-  const [removingKey, setRemovingKey]   = useState<string | null>(null);
+  const [vendorAssets, setVendorAssets]     = useState<VendorAsset[]>([]);
+  const [uploadingKey, setUploadingKey]     = useState<string | null>(null);
+  const [removingKey, setRemovingKey]       = useState<string | null>(null);
+  const [manufacturers, setManufacturers]   = useState<Manufacturer[]>([]);
 
   const [outletModal, setOutletModal] = useState(false);
   const [outletForm, setOutletForm]   = useState({ name:"", marking:"", country:"MY", address:"", isHQ:false });
@@ -35,6 +38,9 @@ export default function SettingsPage() {
   useEffect(() => {
     fetch("/api/outlets").then(r=>r.json()).then(setOutlets).catch(()=>{});
     fetch("/api/vendor-assets").then(r=>r.json()).then(setVendorAssets).catch(()=>{});
+    fetch("/api/manufacturers").then(r=>r.json()).then((d: any[]) =>
+      setManufacturers(d.map(m => ({ id: m.id, name: m.name })).sort((a, b) => a.name.localeCompare(b.name)))
+    ).catch(()=>{});
     if (isAdmin) {
       fetch("/api/users").then(r=>r.json()).then(setUsers).catch(()=>{});
       fetch("/api/exchange-rate").then(r=>r.json()).then((d)=>{ setRate(d); setNewRate(String(d.rate)); }).catch(()=>{});
@@ -319,11 +325,12 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Shoe Box Design */}
+      {/* Shoe Box Design — keyed by manufacturer name */}
       <VendorAssetSection
         title="Shoe Box Design"
-        description="Upload the shoe box artwork for each vendor. Used in production orders and QC references."
+        description="Upload the shoe box artwork for each manufacturer/supplier. Appears in the Remarks column of the PO PDF."
         assetType="box"
+        vendors={manufacturers.map(m => m.name)}
         getAsset={getAsset}
         uploadingKey={uploadingKey}
         removingKey={removingKey}
@@ -331,11 +338,12 @@ export default function SettingsPage() {
         onRemove={handleVendorRemove}
       />
 
-      {/* Logo Design */}
+      {/* Logo Design — keyed by brand name */}
       <VendorAssetSection
         title="Logo Design"
         description="Upload the logo for each vendor brand. Used on purchase orders and packing materials."
         assetType="logo"
+        vendors={[...LOGO_VENDORS]}
         getAsset={getAsset}
         uploadingKey={uploadingKey}
         removingKey={removingKey}
@@ -382,11 +390,12 @@ export default function SettingsPage() {
 }
 
 function VendorAssetSection({
-  title, description, assetType, getAsset, uploadingKey, removingKey, onUpload, onRemove,
+  title, description, assetType, vendors, getAsset, uploadingKey, removingKey, onUpload, onRemove,
 }: {
   title: string;
   description: string;
   assetType: string;
+  vendors: string[];
   getAsset: (vendor: string, assetType: string) => VendorAsset | null;
   uploadingKey: string | null;
   removingKey: string | null;
@@ -402,6 +411,8 @@ function VendorAssetSection({
     input.click();
   }
 
+  if (!vendors.length) return null;
+
   return (
     <div className="card p-6">
       <div className="mb-5">
@@ -409,7 +420,7 @@ function VendorAssetSection({
         <p className="text-xs text-gray-400 mt-0.5">{description}</p>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-        {VENDORS.map(vendor => {
+        {vendors.map(vendor => {
           const asset    = getAsset(vendor, assetType);
           const busy     = uploadingKey === `${vendor}|${assetType}`;
           const removing = removingKey  === `${vendor}|${assetType}`;
