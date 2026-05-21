@@ -114,7 +114,7 @@ export default function InventoryPage() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [committed, setCommitted] = useState<{ saved: number; unmatched: UnmatchedRow[] } | null>(null);
+  const [committed, setCommitted] = useState<{ saved: number; unmatched?: UnmatchedRow[]; unmatchedSkus?: number; unmatchedLocations?: string[] } | null>(null);
   const [uploadError, setUploadError] = useState("");
 
   useEffect(() => {
@@ -384,7 +384,7 @@ export default function InventoryPage() {
                 <h3 className="font-semibold text-green-800 text-lg">Import Complete</h3>
               </div>
               <p className="text-green-700 text-sm">{committed.saved} records saved successfully.</p>
-              {committed.unmatched.length > 0 && (
+              {committed.unmatched && committed.unmatched.length > 0 && (
                 <div className="mt-4">
                   <p className="text-sm font-medium text-amber-700 mb-2">{committed.unmatched.length} rows skipped:</p>
                   <div className="bg-white rounded-lg border border-amber-200 divide-y divide-amber-100 max-h-48 overflow-y-auto">
@@ -397,6 +397,11 @@ export default function InventoryPage() {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+              {committed.unmatchedLocations && committed.unmatchedLocations.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-xs text-amber-700">Unmatched locations: {committed.unmatchedLocations.join(", ")}</p>
                 </div>
               )}
               <div className="mt-5 flex gap-3">
