@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { generateOrderNumber } from "@/lib/utils";
 
 const STORE = "https://shophappy2u.com";
 const SIZE_SUFFIX = /^(.*?)(3[5-9]|4[0-2])$/;
-const MAIN_SKU_PREFIX = /^(S\d{4})/i;
+const MAIN_SKU_RE = /^(S\d{4})/i;
 
 async function fetchAllProducts() {
   const all: any[] = [];
@@ -32,14 +33,108 @@ function stripHtml(html: string): string {
     .replace(/<\/p>/gi, "\n")
     .replace(/<\/li>/gi, "\n")
     .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function mapCategory(productType: string): string {
+  const t = productType.toLowerCase();
+  if (t.includes("heel"))       return "heels";
+  if (t.includes("flat"))       return "flats";
+  if (t.includes("sandal"))     return "sandals";
+  if (t.includes("boot"))       return "boots";
+  if (t.includes("sneaker"))    return "sneakers";
+  if (t.includes("wedge"))      return "wedges";
+  if (t.includes("bag"))        return "bags";
+  if (t.includes("accessor"))   return "accessories";
+  if (t.includes("clearance"))  return "clearance";
+  return t || "accessories";
+}
+
+// One entry per color variant (h2uSku = mainSku + colorCode, e.g. S1806BRS)
+type ColorEntry = {
+  productName:    string;
+  mainSku:        string;
+  h2uSku:         string;
+  colorCode:      string;
+  colorName:      string;
+  category:       string;
+  productType:    string;
+  sellingPrice:   number | null;
+  compareAtPrice: number | null;
+  shoePhotoUrl:   string;
+  description:    string;
+  sizeRange:      string;
+  availableSizes: string; // JSON
+  status:         string;
+  tags:           string[];
+};
+
+function extractColorEntries(product: any): ColorEntry[] {
+  const variantImageMap = new Map<number, string>();
+  for (const img of product.images ?? []) {
+    for (const vid of img.variant_ids ?? []) {
+      if (!variantImageMap.has(vid)) variantImageMap.set(vid, img.src);
+    }
+  }
+  const defaultImage: string = product.images?.[0]?.src ?? "";
+  const description = product.body_html ? stripHtml(product.body_html) : "";
+  const category    = mapCategory(product.product_type ?? "");
+  const tags: string[] = product.tags ?? [];
+
+  // Group variants by color (baseSku = mainSku + colorCode)
+  const byColor = new Map<string, { colorName: string; sizes: string[]; price: number | null; compareAt: number | null; imageUrl: string; available: boolean }>();
+
+  for (const variant of product.variants ?? []) {
+    const raw: string = variant.sku ?? "";
+    if (!raw) continue;
+
+    const m = raw.match(SIZE_SUFFIX);
+    const baseSku   = (m ? m[1] : raw).toUpperCase();
+    const size      = m ? m[2] : null;
+    const colorName = variant.option1 ?? "";
+
+    if (!byColor.has(baseSku)) {
+      const imageUrl = variantImageMap.get(variant.id) ?? defaultImage;
+      byColor.set(baseSku, { colorName, sizes: [], price: null, compareAt: null, imageUrl, available: false });
+    }
+    const entry = byColor.get(baseSku)!;
+    if (size && !entry.sizes.includes(size)) entry.sizes.push(size);
+    if (variant.available) entry.available = true;
+    if (entry.price === null && variant.price) entry.price = parseFloat(variant.price);
+    if (entry.compareAt === null && variant.compare_at_price) entry.compareAt = parseFloat(variant.compare_at_price);
+  }
+
+  const entries: ColorEntry[] = [];
+  for (const [baseSku, data] of byColor.entries()) {
+    const mainMatch = baseSku.match(MAIN_SKU_RE);
+    const mainSku   = mainMatch ? mainMatch[1] : baseSku;
+    const colorCode = baseSku.slice(mainSku.length);
+
+    const sizes     = data.sizes.sort((a, b) => parseInt(a) - parseInt(b));
+    const sizeRange = sizes.length ? `${sizes[0]}–${sizes[sizes.length - 1]}` : "";
+    const status    = data.available ? "active" : "out_of_stock";
+
+    entries.push({
+      productName:    product.title,
+      mainSku,
+      h2uSku:         baseSku,
+      colorCode,
+      colorName:      data.colorName,
+      category,
+      productType:    product.product_type ?? "",
+      sellingPrice:   data.price,
+      compareAtPrice: data.compareAt,
+      shoePhotoUrl:   data.imageUrl,
+      description,
+      sizeRange,
+      availableSizes: JSON.stringify(sizes),
+      status,
+      tags,
+    });
+  }
+  return entries;
 }
 
 export async function POST() {
@@ -52,86 +147,71 @@ export async function POST() {
       return NextResponse.json({ error: "Could not fetch products from shophappy2u.com" }, { status: 502 });
     }
 
-    // skuImageMap:   h2uSku (uppercase) → color-specific image URL
-    // mainSkuDescMap: mainSku (uppercase) → plain-text description
-    const skuImageMap    = new Map<string, string>();
-    const mainSkuDescMap = new Map<string, string>();
-
+    // Build map of all Shopify color entries keyed by h2uSku
+    const shopifyMap = new Map<string, ColorEntry>();
     for (const product of products) {
-      const variantImageMap = new Map<number, string>();
-      for (const img of product.images ?? []) {
-        for (const vid of img.variant_ids ?? []) {
-          if (!variantImageMap.has(vid)) variantImageMap.set(vid, img.src);
-        }
-      }
-      const defaultImage: string =
-        (product.images ?? []).find((i: any) => i.position === 1)?.src ??
-        product.images?.[0]?.src ?? "";
-
-      const description = product.body_html ? stripHtml(product.body_html) : "";
-
-      const seenBase = new Set<string>();
-      for (const variant of product.variants ?? []) {
-        const raw: string = variant.sku ?? "";
-        if (!raw) continue;
-
-        const m = raw.match(SIZE_SUFFIX);
-        const baseSku = m ? m[1] : raw;
-        const baseKey = baseSku.toUpperCase();
-
-        if (!seenBase.has(baseKey)) {
-          seenBase.add(baseKey);
-          const imageUrl = variantImageMap.get(variant.id) ?? defaultImage;
-          if (imageUrl) skuImageMap.set(baseKey, imageUrl);
-        }
-
-        const mp = raw.match(MAIN_SKU_PREFIX);
-        if (mp && description && !mainSkuDescMap.has(mp[1].toUpperCase())) {
-          mainSkuDescMap.set(mp[1].toUpperCase(), description);
-        }
+      for (const entry of extractColorEntries(product)) {
+        if (!shopifyMap.has(entry.h2uSku)) shopifyMap.set(entry.h2uSku, entry);
       }
     }
 
-    const items = await prisma.productLibrary.findMany({
-      where: { OR: [{ h2uSku: { not: null } }, { mainSku: { not: null } }] },
-      select: { id: true, h2uSku: true, mainSku: true },
+    // Get existing ProductLibrary entries
+    const existing = await prisma.productLibrary.findMany({
+      select: { id: true, h2uSku: true, libNumber: true },
     });
+    const existingMap = new Map(existing.filter(e => e.h2uSku).map(e => [e.h2uSku!.toUpperCase(), e]));
 
-    let photosUpdated = 0;
-    let descUpdated   = 0;
-    let skipped       = 0;
+    // Get current count for libNumber generation
+    let libCount = await prisma.productLibrary.count();
 
-    // Build all updates then run in parallel batches of 20
-    const updates: Promise<any>[] = [];
-    for (const item of items) {
-      const baseKey = (item.h2uSku ?? "").toUpperCase();
-      const mainKey = (item.mainSku ?? "").toUpperCase();
-      const imageUrl    = skuImageMap.get(baseKey);
-      const description = mainSkuDescMap.get(mainKey);
+    const toCreate: any[] = [];
+    const toUpdate: { id: string; data: any }[] = [];
 
-      const data: any = {};
-      if (imageUrl)    { data.shoePhotoUrl = imageUrl;   photosUpdated++; }
-      if (description) { data.description  = description; descUpdated++;  }
+    for (const [h2uSku, entry] of shopifyMap.entries()) {
+      const data = {
+        productName:    entry.productName,
+        mainSku:        entry.mainSku,
+        h2uSku:         entry.h2uSku,
+        colorCode:      entry.colorCode,
+        colorName:      entry.colorName,
+        category:       entry.category,
+        productType:    entry.productType,
+        sellingPrice:   entry.sellingPrice,
+        compareAtPrice: entry.compareAtPrice,
+        shoePhotoUrl:   entry.shoePhotoUrl || undefined,
+        description:    entry.description || undefined,
+        sizeRange:      entry.sizeRange || undefined,
+        availableSizes: entry.availableSizes,
+        status:         entry.status,
+        brand:          "Happy2U",
+      };
 
-      if (Object.keys(data).length) {
-        updates.push(prisma.productLibrary.update({ where: { id: item.id }, data }));
+      if (existingMap.has(h2uSku)) {
+        toUpdate.push({ id: existingMap.get(h2uSku)!.id, data });
       } else {
-        skipped++;
+        libCount++;
+        toCreate.push({ ...data, libNumber: generateOrderNumber("PL", libCount) });
       }
     }
 
-    // Execute in batches to avoid overwhelming the DB
+    // Execute in batches of 20
     const BATCH = 20;
-    for (let i = 0; i < updates.length; i += BATCH) {
-      await Promise.all(updates.slice(i, i + BATCH));
+    for (let i = 0; i < toCreate.length; i += BATCH) {
+      await prisma.$transaction(
+        toCreate.slice(i, i + BATCH).map(d => prisma.productLibrary.create({ data: d }))
+      );
+    }
+    for (let i = 0; i < toUpdate.length; i += BATCH) {
+      await prisma.$transaction(
+        toUpdate.slice(i, i + BATCH).map(({ id, data }) => prisma.productLibrary.update({ where: { id }, data }))
+      );
     }
 
     return NextResponse.json({
       shopifyProducts: products.length,
-      shopifySkus:     skuImageMap.size,
-      photosUpdated,
-      descUpdated,
-      skipped,
+      shopifyColorVariants: shopifyMap.size,
+      created: toCreate.length,
+      updated: toUpdate.length,
     });
   } catch (err: any) {
     console.error("Shopify sync error:", err);
