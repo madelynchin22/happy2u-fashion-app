@@ -100,6 +100,7 @@ function buildGroups(rows: RawRow[]): ProductGroup[] {
 
 export default function InventoryPage() {
   const [tab, setTab] = useState<"view" | "upload">("view");
+  const [uploadMode, setUploadMode] = useState<"shopify" | "custom">("shopify");
   const [outlets, setOutlets] = useState<Outlet[]>([]);
   const [selectedOutlet, setSelectedOutlet] = useState("");
   const [search, setSearch] = useState("");
@@ -136,12 +137,16 @@ export default function InventoryPage() {
 
   useEffect(() => { if (tab === "view") loadInventory(); }, [tab, selectedOutlet]);
 
+  function uploadEndpoint() {
+    return uploadMode === "shopify" ? "/api/inventory/upload-shopify" : "/api/inventory/upload";
+  }
+
   async function handlePreview() {
     if (!file) return;
     setUploading(true); setPreview(null); setUploadError("");
     const fd = new FormData(); fd.append("file", file); fd.append("commit", "false");
     try {
-      const res = await fetch("/api/inventory/upload", { method: "POST", body: fd });
+      const res = await fetch(uploadEndpoint(), { method: "POST", body: fd });
       const json = await res.json();
       if (!res.ok) setUploadError(json.error ?? "Upload failed"); else setPreview(json);
     } catch { setUploadError("Network error"); }
@@ -153,7 +158,7 @@ export default function InventoryPage() {
     setUploading(true);
     const fd = new FormData(); fd.append("file", file); fd.append("commit", "true");
     try {
-      const res = await fetch("/api/inventory/upload", { method: "POST", body: fd });
+      const res = await fetch(uploadEndpoint(), { method: "POST", body: fd });
       const json = await res.json();
       if (!res.ok) setUploadError(json.error ?? "Commit failed");
       else { setCommitted(json); setPreview(null); }
@@ -401,15 +406,38 @@ export default function InventoryPage() {
             </div>
           ) : (
             <>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 flex items-start gap-3">
-                <DownloadCloud size={18} className="text-blue-600 mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-blue-800">Excel / CSV Format</p>
-                  <p className="text-xs text-blue-600 mt-0.5">Columns: <span className="font-mono">SKU, Location, Size 35–42, Notes</span></p>
-                  <p className="text-xs text-blue-500 mt-0.5">SKU must match a Product Library entry. Location must match an outlet name or marking code.</p>
-                </div>
-                <button onClick={downloadTemplate} className="text-xs text-blue-700 underline hover:text-blue-900 flex-shrink-0">Download template</button>
+              {/* Format selector */}
+              <div className="flex gap-2 mb-5">
+                {([["shopify", "Shopify Export"], ["custom", "Custom Template"]] as const).map(([mode, label]) => (
+                  <button key={mode} onClick={() => { setUploadMode(mode); resetUpload(); }}
+                    className={`flex-1 py-2.5 px-4 rounded-xl border text-sm font-medium transition-colors ${
+                      uploadMode === mode ? "bg-brand-600 text-white border-brand-600" : "bg-white text-gray-600 border-gray-300 hover:border-brand-400"
+                    }`}>
+                    {label}
+                  </button>
+                ))}
               </div>
+
+              {uploadMode === "shopify" ? (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-5 flex items-start gap-3">
+                  <DownloadCloud size={18} className="text-green-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-green-800">Shopify Inventory Export</p>
+                    <p className="text-xs text-green-700 mt-0.5">Upload the Excel file directly from <span className="font-semibold">Shopify Admin → Products → Inventory → Export</span></p>
+                    <p className="text-xs text-green-600 mt-0.5">Reads Variant SKU and all "Inventory Available: [Location]" columns automatically.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 flex items-start gap-3">
+                  <DownloadCloud size={18} className="text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-blue-800">Custom Excel / CSV Format</p>
+                    <p className="text-xs text-blue-600 mt-0.5">Columns: <span className="font-mono">SKU, Location, Size 35–42, Notes</span></p>
+                    <p className="text-xs text-blue-500 mt-0.5">SKU must match a Product Library entry. Location must match an outlet name or marking code.</p>
+                  </div>
+                  <button onClick={downloadTemplate} className="text-xs text-blue-700 underline hover:text-blue-900 flex-shrink-0">Download template</button>
+                </div>
+              )}
 
               <div
                 className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/30 transition-colors"
