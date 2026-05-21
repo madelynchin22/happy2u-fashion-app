@@ -72,13 +72,11 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     }
   }
 
-  // ── Vendor assets (shoe box + logo) ──
-  // Primary key: manufacturer name (e.g. "Nancy", "Anna") — set in Settings > Shoe Box Design
-  // Fallback key: item brand (e.g. "BlissFit", "Happy2U") — for logo and brand-level assets
+  // ── Vendor assets (shoe box + logo) by Shopify brand ──
+  // Brand comes from ProductLibrary.brand (synced from Shopify product.vendor field)
   const rawItems: any[] = poRaw.items ?? [];
-  const manufacturerName = poRaw.manufacturer?.name ?? null;
 
-  // Resolve item brand from ProductLibrary for logo fallback
+  // For items without a brand, look it up from ProductLibrary via h2uSku
   const skusNeedingBrand = rawItems.filter(i => !i.brand && i.h2uSku).map(i => i.h2uSku as string);
   const libBrands = skusNeedingBrand.length
     ? await prisma.productLibrary.findMany({
@@ -88,15 +86,14 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     : [];
   const h2uToBrand = new Map(libBrands.map((l: any) => [l.h2uSku, l.brand]));
 
-  const vendorKeySet = new Set<string>();
-  if (manufacturerName) vendorKeySet.add(manufacturerName);
+  const brandSet = new Set<string>();
   for (const item of rawItems) {
     const brand = item.brand ?? (item.h2uSku ? h2uToBrand.get(item.h2uSku) : null);
-    if (brand) vendorKeySet.add(brand);
+    if (brand) brandSet.add(brand);
   }
 
-  const vendorAssets = vendorKeySet.size
-    ? await prisma.vendorAsset.findMany({ where: { vendor: { in: [...vendorKeySet] } } })
+  const vendorAssets = brandSet.size
+    ? await prisma.vendorAsset.findMany({ where: { vendor: { in: [...brandSet] } } })
     : [];
 
   const vendorUriMap = new Map<string, { boxUri: string | null; logoUri: string | null }>();
@@ -110,30 +107,26 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     })
   );
 
-  // Manufacturer-level assets take priority for box design; item brand used for logo
-  const mfgAssets = manufacturerName ? vendorUriMap.get(manufacturerName) : null;
-
   // ── Build enriched PO ──
   const po = {
     ...poRaw,
     photoUrl: mainPhotoUri,
     libProductName,
     items: await Promise.all(rawItems.map(async (item: any) => {
-      const colorKey    = item.colorName?.toLowerCase() ?? "";
-      const colourUri   = colorKey ? colorPhotoMap.get(colorKey) ?? null : null;
-      const mainSku     = (colorKey ? mainSkuMap.get(colorKey)   : null) ?? item.mainSku   ?? null;
-      const colorCode   = (colorKey ? colorCodeMap.get(colorKey) : null) ?? item.colorCode ?? null;
-      const brand       = item.brand ?? (item.h2uSku ? h2uToBrand.get(item.h2uSku) : null) ?? null;
-      const brandAssets = brand ? vendorUriMap.get(brand) : null;
+      const colorKey  = item.colorName?.toLowerCase() ?? "";
+      const colourUri = colorKey ? colorPhotoMap.get(colorKey) ?? null : null;
+      const mainSku   = (colorKey ? mainSkuMap.get(colorKey)   : null) ?? item.mainSku   ?? null;
+      const colorCode = (colorKey ? colorCodeMap.get(colorKey) : null) ?? item.colorCode ?? null;
+      const brand     = item.brand ?? (item.h2uSku ? h2uToBrand.get(item.h2uSku) : null) ?? null;
+      const assets    = brand ? vendorUriMap.get(brand) : null;
       return {
         ...item,
         photoUrl:      colourUri ?? mainPhotoUri,
         mainSku,
         colorCode,
         brand,
-        // Box design: manufacturer-level first, then brand-level fallback
-        boxDesignUri:  mfgAssets?.boxUri  ?? brandAssets?.boxUri  ?? null,
-        logoDesignUri: mfgAssets?.logoUri ?? brandAssets?.logoUri ?? null,
+        boxDesignUri:  assets?.boxUri  ?? null,
+        logoDesignUri: assets?.logoUri ?? null,
       };
     })),
   };

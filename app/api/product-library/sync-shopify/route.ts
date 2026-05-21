@@ -55,6 +55,7 @@ function mapCategory(productType: string): string {
 // One entry per color variant (h2uSku = mainSku + colorCode, e.g. S1806BRS)
 type ColorEntry = {
   productName:    string;
+  vendor:         string;
   mainSku:        string;
   h2uSku:         string;
   colorCode:      string;
@@ -82,6 +83,8 @@ function extractColorEntries(product: any): ColorEntry[] {
   const description = product.body_html ? stripHtml(product.body_html) : "";
   const category    = mapCategory(product.product_type ?? "");
   const tags: string[] = product.tags ?? [];
+  // Normalise vendor: collapse non-breaking spaces → regular space
+  const vendor = (product.vendor ?? "Happy2U").replace(/ /g, " ").trim();
 
   // Group variants by color (baseSku = mainSku + colorCode)
   const byColor = new Map<string, { colorName: string; sizes: string[]; price: number | null; compareAt: number | null; imageUrl: string; available: boolean }>();
@@ -118,6 +121,7 @@ function extractColorEntries(product: any): ColorEntry[] {
 
     entries.push({
       productName:    product.title,
+      vendor,
       mainSku,
       h2uSku:         baseSku,
       colorCode,
@@ -183,7 +187,7 @@ export async function POST() {
         sizeRange:      entry.sizeRange || undefined,
         availableSizes: entry.availableSizes,
         status:         entry.status,
-        brand:          "Happy2U",
+        brand:          entry.vendor,
       };
 
       if (existingMap.has(h2uSku)) {

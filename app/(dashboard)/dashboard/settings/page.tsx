@@ -3,10 +3,9 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Save, Plus, Trash2, Edit2, X, Upload, Trash } from "lucide-react";
 
-// Logo brands — static list of product sub-brands used on shoe logos
-const LOGO_VENDORS = ["Belle", "BlissFit", "Bunny", "Fashion Bag", "Happy2U", "La Dolce Vita", "Latex", "Mary Jane"] as const;
+// Fallback vendor list — overridden by brands loaded from ProductLibrary
+const DEFAULT_VENDORS = ["Belle", "BlissFit", "Bunny", "Fashion Bag", "Happy2U", "La Dolce Vita", "Latex", "Mary Jane"];
 type VendorAsset = { id: string; vendor: string; assetType: string; imageUrl: string };
-type Manufacturer = { id: string; name: string };
 
 type Outlet = { id: string; name: string; marking: string; country: string; address?: string; isHQ: boolean };
 type User   = { id: string; name?: string; email: string; role: string; outletId?: string };
@@ -23,10 +22,10 @@ export default function SettingsPage() {
   const [newRate, setNewRate] = useState("0.62");
   const [saving, setSaving]   = useState(false);
 
-  const [vendorAssets, setVendorAssets]     = useState<VendorAsset[]>([]);
-  const [uploadingKey, setUploadingKey]     = useState<string | null>(null);
-  const [removingKey, setRemovingKey]       = useState<string | null>(null);
-  const [manufacturers, setManufacturers]   = useState<Manufacturer[]>([]);
+  const [vendorAssets, setVendorAssets] = useState<VendorAsset[]>([]);
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const [removingKey, setRemovingKey]   = useState<string | null>(null);
+  const [vendorNames, setVendorNames]   = useState<string[]>(DEFAULT_VENDORS);
 
   const [outletModal, setOutletModal] = useState(false);
   const [outletForm, setOutletForm]   = useState({ name:"", marking:"", country:"MY", address:"", isHQ:false });
@@ -38,9 +37,12 @@ export default function SettingsPage() {
   useEffect(() => {
     fetch("/api/outlets").then(r=>r.json()).then(setOutlets).catch(()=>{});
     fetch("/api/vendor-assets").then(r=>r.json()).then(setVendorAssets).catch(()=>{});
-    fetch("/api/manufacturers").then(r=>r.json()).then((d: any[]) =>
-      setManufacturers(d.map(m => ({ id: m.id, name: m.name })).sort((a, b) => a.name.localeCompare(b.name)))
-    ).catch(()=>{});
+    // Load unique brand/vendor names from Product Library (synced from Shopify)
+    fetch("/api/product-library?limit=1000").then(r=>r.json()).then((d: any[]) => {
+      if (!Array.isArray(d)) return;
+      const brands = [...new Set(d.map((p: any) => p.brand).filter(Boolean))].sort();
+      if (brands.length) setVendorNames(brands);
+    }).catch(()=>{});
     if (isAdmin) {
       fetch("/api/users").then(r=>r.json()).then(setUsers).catch(()=>{});
       fetch("/api/exchange-rate").then(r=>r.json()).then((d)=>{ setRate(d); setNewRate(String(d.rate)); }).catch(()=>{});
@@ -325,12 +327,12 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Shoe Box Design — keyed by manufacturer name */}
+      {/* Shoe Box Design — keyed by Shopify vendor/brand */}
       <VendorAssetSection
         title="Shoe Box Design"
-        description="Upload the shoe box artwork for each manufacturer/supplier. Appears in the Remarks column of the PO PDF."
+        description="Upload the shoe box artwork for each brand. Appears in the Remarks column of the PO PDF. Brands are synced automatically from Shopify."
         assetType="box"
-        vendors={manufacturers.map(m => m.name)}
+        vendors={vendorNames}
         getAsset={getAsset}
         uploadingKey={uploadingKey}
         removingKey={removingKey}
@@ -338,12 +340,12 @@ export default function SettingsPage() {
         onRemove={handleVendorRemove}
       />
 
-      {/* Logo Design — keyed by brand name */}
+      {/* Logo Design — keyed by brand */}
       <VendorAssetSection
         title="Logo Design"
         description="Upload the logo for each vendor brand. Used on purchase orders and packing materials."
         assetType="logo"
-        vendors={[...LOGO_VENDORS]}
+        vendors={vendorNames}
         getAsset={getAsset}
         uploadingKey={uploadingKey}
         removingKey={removingKey}
