@@ -91,12 +91,17 @@ const S = StyleSheet.create({
   footer: { position: "absolute", bottom: 12, left: 20, right: 20, flexDirection: "row", justifyContent: "space-between", fontSize: 6.5, color: "#aaa", borderTop: "0.5pt solid #e5e7eb", paddingTop: 3 },
 });
 
-// Strip trailing uppercase color-code suffix to get the model base key.
+// Strip trailing uppercase colour-code suffix to get the model base key.
 // e.g. "S1727BR" → "S1727", "S1625-2H" → "S1625-2", "S1701RGL" → "S1701"
+// Tries h2uSku first, falls back to supplierSku with the same stripping logic.
 function modelKey(item: any): string {
-  const stripped = (item.h2uSku ?? "").replace(/[A-Z]+$/, "");
-  if (stripped) return stripped;
-  return item.supplierSku || item.h2uSku || "";
+  for (const raw of [item.h2uSku, item.supplierSku]) {
+    if (!raw) continue;
+    const stripped = String(raw).replace(/[A-Z]+$/, "");
+    if (stripped) return stripped;
+    return String(raw); // raw was all-uppercase e.g. "BRS"
+  }
+  return "";
 }
 
 export function PurchaseOrderPDF({ po }: { po: any }) {

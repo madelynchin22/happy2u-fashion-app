@@ -131,10 +131,18 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     })),
   };
 
-  // Sort items so same-model colours are always adjacent (fixes grouping for any DB order)
+  // Sort items so same-model colours are adjacent; use h2uSku then supplierSku as key
+  function itemSortKey(item: any): string {
+    for (const raw of [item.h2uSku, item.supplierSku]) {
+      if (!raw) continue;
+      const stripped = String(raw).replace(/[A-Z]+$/, "");
+      return stripped || String(raw);
+    }
+    return "";
+  }
   (po.items as any[]).sort((a: any, b: any) => {
-    const ka = (a.h2uSku ?? "").replace(/[A-Z]+$/, "");
-    const kb = (b.h2uSku ?? "").replace(/[A-Z]+$/, "");
+    const ka = itemSortKey(a);
+    const kb = itemSortKey(b);
     return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
 
