@@ -96,18 +96,19 @@ export function PurchaseOrderPDF({ po }: { po: any }) {
   const currency = po.currency === "RMB" ? "¥" : "RM";
   const supplierName = po.manufacturer?.name ?? "";
 
-  // Group consecutive items by model (strip color-code suffix from h2uSku)
-  const groups: { modelKey: string; supplierSku: string; items: any[] }[] = [];
+  // Group items by model key (strip color-code suffix), preserving first-seen order
+  const groupMap = new Map<string, { modelKey: string; supplierSku: string; items: any[] }>();
+  const groupOrder: string[] = [];
   for (const item of items) {
-    const modelKey = item.h2uSku?.replace(/[A-Z]+$/, "") || item.supplierSku || item.h2uSku || "";
-    const displaySku = item.supplierSku || modelKey || item.h2uSku || "";
-    const last = groups[groups.length - 1];
-    if (last && last.modelKey === modelKey) {
-      last.items.push(item);
-    } else {
-      groups.push({ modelKey, supplierSku: displaySku, items: [item] });
+    const modelKey = item.mainSku || item.h2uSku?.replace(/[A-Z]+$/, "") || item.supplierSku || item.h2uSku || "";
+    const displaySku = item.supplierSku || item.mainSku || modelKey || item.h2uSku || "";
+    if (!groupMap.has(modelKey)) {
+      groupMap.set(modelKey, { modelKey, supplierSku: displaySku, items: [] });
+      groupOrder.push(modelKey);
     }
+    groupMap.get(modelKey)!.items.push(item);
   }
+  const groups = groupOrder.map(k => groupMap.get(k)!);
 
   const totalPairs = items.reduce((s, i) => s + (i.totalPairs ?? 0), 0);
   const totalPrice = items.reduce((s, i) => s + (i.lineTotal ?? 0), 0);

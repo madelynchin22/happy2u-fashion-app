@@ -36,7 +36,7 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
 
   const poRaw = await prisma.purchaseOrder.findUnique({
     where: { id: (await params).id },
-    include: { manufacturer: true, items: true },
+    include: { manufacturer: true, items: { orderBy: { id: "asc" } } },
   });
   if (!poRaw) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
