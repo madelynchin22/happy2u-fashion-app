@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { PurchaseOrderPDF } from "@/lib/pdf/purchase-order";
+import { PurchaseOrderPDF } from "@/lib/pdf/purchase-order-v2";
 import { join } from "path";
 import sharp from "sharp";
 import React from "react";
@@ -137,14 +137,6 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     const kb = (b.h2uSku ?? "").replace(/[A-Z]+$/, "");
     return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
-
-  // DEBUG: log items to diagnose grouping issues
-  console.log("[PDF DEBUG] PO items after sort:", (po.items as any[]).map((i: any) => ({
-    h2uSku: i.h2uSku,
-    supplierSku: i.supplierSku,
-    colorName: i.colorName,
-    modelKey: (i.h2uSku ?? "").replace(/[A-Z]+$/, "") || i.supplierSku || "",
-  })));
 
   const buffer = await renderToBuffer(React.createElement(PurchaseOrderPDF, { po }) as any);
 
