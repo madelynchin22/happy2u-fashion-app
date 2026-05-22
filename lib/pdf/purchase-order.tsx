@@ -96,15 +96,16 @@ export function PurchaseOrderPDF({ po }: { po: any }) {
   const currency = po.currency === "RMB" ? "¥" : "RM";
   const supplierName = po.manufacturer?.name ?? "";
 
-  // Group items by supplierSku — same model = same photo block
-  const groups: { supplierSku: string; items: any[] }[] = [];
+  // Group consecutive items by model (strip color-code suffix from h2uSku)
+  const groups: { modelKey: string; supplierSku: string; items: any[] }[] = [];
   for (const item of items) {
-    const key = item.supplierSku || item.h2uSku || "";
+    const modelKey = item.h2uSku?.replace(/[A-Z]+$/, "") || item.supplierSku || item.h2uSku || "";
+    const displaySku = item.supplierSku || modelKey || item.h2uSku || "";
     const last = groups[groups.length - 1];
-    if (last && last.supplierSku === key) {
+    if (last && last.modelKey === modelKey) {
       last.items.push(item);
     } else {
-      groups.push({ supplierSku: key, items: [item] });
+      groups.push({ modelKey, supplierSku: displaySku, items: [item] });
     }
   }
 
