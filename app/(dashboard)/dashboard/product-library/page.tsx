@@ -581,12 +581,6 @@ export default function ProductLibraryPage() {
             <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
             {syncing ? "Syncing photos…" : "Sync photos from website"}
           </button>
-          <button onClick={() => xlsxRef.current?.click()} disabled={importing}
-            className="btn-secondary flex items-center gap-2 text-sm">
-            <Upload size={14} />{importing ? "Importing…" : "Import Excel"}
-          </button>
-          <input ref={xlsxRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) importExcel(f); e.target.value=""; }} />
           <button onClick={() => shopifyExportRef.current?.click()} disabled={importingExport}
             className="btn-secondary flex items-center gap-2 text-sm">
             <Upload size={14} />{importingExport ? "Importing…" : "Import Shopify Export"}
