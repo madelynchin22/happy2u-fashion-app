@@ -11,6 +11,7 @@ import React from "react";
 // Convert a local path or external URL to a JPEG data URI for react-pdf
 async function toDataUri(url: string | null | undefined): Promise<string | null> {
   if (!url) return null;
+  if (url.startsWith("data:")) return url;
   try {
     let input: string | Buffer;
     if (url.startsWith("http://") || url.startsWith("https://")) {

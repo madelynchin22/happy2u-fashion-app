@@ -1415,7 +1415,10 @@ function PurchaseOrdersContent() {
                   const totalPairs = sGroup.pos.reduce((s, p) => s + p.totalPairs, 0);
                   const totalRmb   = sGroup.pos.reduce((s, p) => s + p.totalPrice, 0);
                   const totalRm    = sGroup.pos.reduce((s, p) => s + (p.fxRate ? p.totalPrice * p.fxRate : p.totalPrice * 0.62), 0);
-                  const groupPdfUrl = `/api/purchase-orders/group-pdf?ids=${sGroup.pos.map(p => p.id).join(",")}&group=${encodeURIComponent(poCode)}&supplier=${encodeURIComponent(sGroup.name)}`;
+                  // Single-PO group → use individual PDF (has photos); multi-PO → group PDF
+                  const groupPdfUrl = sGroup.pos.length === 1
+                    ? `/api/purchase-orders/${sGroup.pos[0].id}/pdf`
+                    : `/api/purchase-orders/group-pdf?ids=${sGroup.pos.map(p => p.id).join(",")}&group=${encodeURIComponent(poCode)}&supplier=${encodeURIComponent(sGroup.name)}`;
                   const groupPlUrl  = `/api/purchase-orders/group-pdf-pl?ids=${sGroup.pos.map(p => p.id).join(",")}&group=${encodeURIComponent(poCode)}&supplier=${encodeURIComponent(sGroup.name)}`;
                   rows.push(
                     <tr key={`s-${mGroup.mk}-${sGroup.poNumber}`}>
@@ -1535,25 +1538,13 @@ function PurchaseOrdersContent() {
                           ) : (
                             <span className="text-xs text-gray-400">on time</span>
                           )}
-                          <div className="flex items-center gap-1">
-                            <a
-                              href={`/api/purchase-orders/${p.id}/pdf`}
-                              target="_blank"
-                              rel="noopener"
-                              title={`Download PDF for ${p.poNumber}`}
-                              onClick={e => e.stopPropagation()}
-                              className="p-1 text-gray-300 hover:text-brand-600 hover:bg-brand-50 rounded transition-colors shrink-0"
-                            >
-                              <Download size={12} />
-                            </a>
-                            <button
-                              onClick={e => deletePO(p.id, p.poNumber, e)}
-                              title={`Delete ${p.poNumber}`}
-                              className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors shrink-0"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
+                          <button
+                            onClick={e => deletePO(p.id, p.poNumber, e)}
+                            title={`Delete ${p.poNumber}`}
+                            className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors shrink-0"
+                          >
+                            <Trash2 size={12} />
+                          </button>
                         </div>
                       </td>
                     </tr>
