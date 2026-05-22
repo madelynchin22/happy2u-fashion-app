@@ -99,6 +99,7 @@ export default function ProductLibraryPage() {
   const [importing, setImporting] = useState(false);
   const [syncing, setSyncing]     = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [missedSkus, setMissedSkus] = useState<string[]>([]);
   const [creatingPO, setCreatingPO] = useState<string | null>(null);
 
   // Group-edit modal state
@@ -536,9 +537,11 @@ export default function ProductLibraryPage() {
       const d = await res.json();
       if (res.ok) {
         setSyncResult(`✓ Updated ${d.updated} SKUs (${d.notFound} not matched of ${d.total} total)`);
+        setMissedSkus(d.missedSkus ?? []);
         fetch("/api/product-library").then(r => r.json()).then(setAllItems).catch(() => {});
       } else {
         setSyncResult(`✗ Import failed: ${d.error ?? "unknown error"}`);
+        setMissedSkus([]);
       }
     } catch (e: any) {
       setSyncResult(`✗ Import failed: ${e?.message ?? "unknown error"}`);
@@ -598,6 +601,16 @@ export default function ProductLibraryPage() {
       {syncResult && (
         <div className={`px-4 py-2 rounded-lg text-sm ${syncResult.startsWith("✓") ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
           {syncResult}
+        </div>
+      )}
+      {missedSkus.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm">
+          <p className="font-semibold text-amber-800 mb-2">Unmatched SKUs from Shopify export ({missedSkus.length}) — not found in Product Library:</p>
+          <div className="flex flex-wrap gap-1.5">
+            {missedSkus.map(sku => (
+              <span key={sku} className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-mono text-xs">{sku}</span>
+            ))}
+          </div>
         </div>
       )}
 

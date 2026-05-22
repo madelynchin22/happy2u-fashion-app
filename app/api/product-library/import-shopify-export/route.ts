@@ -86,6 +86,6 @@ export async function POST(req: NextRequest) {
     updated,
     notFound,
     total: grouped.size,
-    missedSkus: missedSkus.slice(0, 20),
+    missedSkus,
   });
 }
