@@ -49,6 +49,17 @@ export async function GET(req: NextRequest) {
 
   const outletMap = new Map(allOutlets.map(o => [o.id, o]));
 
+  // Sort allOutlets by the order they appear in the first item's outletAllocations
+  // (which was imported from Excel, preserving the Excel display order)
+  const firstAllocsRaw = pos.flatMap(p => p.items as any[]).find(i => i.outletAllocations)?.outletAllocations;
+  if (firstAllocsRaw) {
+    try {
+      const firstAllocs: { outletId: string }[] = JSON.parse(firstAllocsRaw);
+      const orderMap = new Map(firstAllocs.map((a, i) => [a.outletId, i]));
+      allOutlets.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+    } catch {}
+  }
+
   // Fetch photos via sample orders + product library
   const orderNumbers = [...new Set(pos.map(p => p.sampleOrderId).filter(Boolean))] as string[];
   const samples = orderNumbers.length
