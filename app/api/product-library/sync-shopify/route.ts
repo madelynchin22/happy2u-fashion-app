@@ -166,7 +166,7 @@ export async function POST() {
 
     // Get existing ProductLibrary entries
     const existing = await prisma.productLibrary.findMany({
-      select: { id: true, h2uSku: true, libNumber: true },
+      select: { id: true, h2uSku: true, libNumber: true, status: true },
     });
     const existingMap = new Map(existing.filter(e => e.h2uSku).map(e => [e.h2uSku!.toUpperCase(), e]));
 
@@ -217,9 +217,12 @@ export async function POST() {
     }
 
     // Products in DB with a h2uSku that Shopify no longer lists → archived
+    // Exclude draft (not on Shopify yet) and already-archived entries
     const shopifySkus = new Set([...shopifyMap.keys()]);
     const toArchive = existing.filter(
-      e => e.h2uSku && !shopifySkus.has(e.h2uSku.toUpperCase())
+      e => e.h2uSku
+        && !shopifySkus.has(e.h2uSku.toUpperCase())
+        && !["draft", "archived"].includes(e.status ?? "")
     );
     for (let i = 0; i < toArchive.length; i += BATCH) {
       await prisma.$transaction(
