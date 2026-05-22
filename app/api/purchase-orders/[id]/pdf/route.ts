@@ -131,6 +131,13 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     })),
   };
 
+  // Sort items so same-model colours are always adjacent (fixes grouping for any DB order)
+  (po.items as any[]).sort((a: any, b: any) => {
+    const ka = (a.h2uSku ?? "").replace(/[A-Z]+$/, "");
+    const kb = (b.h2uSku ?? "").replace(/[A-Z]+$/, "");
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+
   const buffer = await renderToBuffer(React.createElement(PurchaseOrderPDF, { po }) as any);
 
   return new NextResponse(buffer as unknown as BodyInit, {
