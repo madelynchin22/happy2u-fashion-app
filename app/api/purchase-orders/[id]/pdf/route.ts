@@ -138,6 +138,14 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
 
+  // DEBUG: log items to diagnose grouping issues
+  console.log("[PDF DEBUG] PO items after sort:", (po.items as any[]).map((i: any) => ({
+    h2uSku: i.h2uSku,
+    supplierSku: i.supplierSku,
+    colorName: i.colorName,
+    modelKey: (i.h2uSku ?? "").replace(/[A-Z]+$/, "") || i.supplierSku || "",
+  })));
+
   const buffer = await renderToBuffer(React.createElement(PurchaseOrderPDF, { po }) as any);
 
   return new NextResponse(buffer as unknown as BodyInit, {
