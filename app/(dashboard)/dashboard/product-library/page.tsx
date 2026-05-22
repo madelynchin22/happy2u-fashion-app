@@ -203,6 +203,8 @@ export default function ProductLibraryPage() {
   const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
   const [pendingPhotoField, setPendingPhotoField] = useState<string | null>(null);
   const xlsxRef = useRef<HTMLInputElement>(null);
+  const shopifyExportRef = useRef<HTMLInputElement>(null);
+  const [importingExport, setImportingExport] = useState(false);
   const singlePhotoInputRef = useRef<HTMLInputElement>(null);
 
   const [vendorBoxMap, setVendorBoxMap] = useState<Record<string, string>>({});
@@ -517,6 +519,34 @@ export default function ProductLibraryPage() {
     }
   }
 
+  async function importShopifyExport(file: File) {
+    setImportingExport(true);
+    setSyncResult(null);
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets["Products"] ?? wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws);
+      const res = await fetch("/api/product-library/import-shopify-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rows),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setSyncResult(`✓ Updated ${d.updated} SKUs (${d.notFound} not matched of ${d.total} total)`);
+        fetch("/api/product-library").then(r => r.json()).then(setAllItems).catch(() => {});
+      } else {
+        setSyncResult(`✗ Import failed: ${d.error ?? "unknown error"}`);
+      }
+    } catch (e: any) {
+      setSyncResult(`✗ Import failed: ${e?.message ?? "unknown error"}`);
+    } finally {
+      setImportingExport(false);
+    }
+  }
+
   async function importExcel(file: File) {
     setImporting(true);
     const XLSX = await import("xlsx");
@@ -554,6 +584,12 @@ export default function ProductLibraryPage() {
           </button>
           <input ref={xlsxRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
             onChange={e => { const f = e.target.files?.[0]; if (f) importExcel(f); e.target.value=""; }} />
+          <button onClick={() => shopifyExportRef.current?.click()} disabled={importingExport}
+            className="btn-secondary flex items-center gap-2 text-sm">
+            <Upload size={14} />{importingExport ? "Importing…" : "Import Shopify Export"}
+          </button>
+          <input ref={shopifyExportRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) importShopifyExport(f); e.target.value=""; }} />
           <button onClick={openAdd} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Product
           </button>

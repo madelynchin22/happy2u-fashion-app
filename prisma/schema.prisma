@@ -619,6 +619,9 @@ model ProductLibrary {
   costRm          Float?
   sellingPrice    Float?
 
+  // Per-outlet inventory (from Shopify export — summed across all sizes)
+  outletInventory String?  // JSON: { "AEON ABM (DEPT)": 5, "H2U Warehouse (Melaka)": 20, ... }
+
   // Sales velocity (derived from inventory snapshot comparison)
   unitsSold       Int?     // units sold in the tracked window (null = unknown due to restock)
   daysTracked     Int?     // length of the window in days
