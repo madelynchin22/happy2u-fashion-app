@@ -536,8 +536,6 @@ export default function ProductLibraryPage() {
       });
       const d = await res.json();
       if (res.ok) {
-        // Also recalculate statuses for any items not matched by h2uSku
-        await fetch("/api/product-library/recalculate-statuses", { method: "POST" });
         setSyncResult(`✓ Updated ${d.updated} SKUs (${d.notFound} not matched of ${d.total} total)`);
         setMissedSkus(d.missedSkus ?? []);
         fetch("/api/product-library").then(r => r.json()).then(setAllItems).catch(() => {});
@@ -581,7 +579,7 @@ export default function ProductLibraryPage() {
           <button onClick={syncShopifyPhotos} disabled={syncing}
             className="btn-secondary flex items-center gap-2 text-sm">
             <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
-            {syncing ? "Syncing photos…" : "Sync photos from website"}
+            {syncing ? "Syncing…" : "Sync from Shopify"}
           </button>
           <button onClick={() => shopifyExportRef.current?.click()} disabled={importingExport}
             className="btn-secondary flex items-center gap-2 text-sm">

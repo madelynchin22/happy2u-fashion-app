@@ -117,7 +117,11 @@ function extractColorEntries(product: any): ColorEntry[] {
 
     const sizes     = data.sizes.sort((a, b) => parseInt(a) - parseInt(b));
     const sizeRange = sizes.length ? `${sizes[0]}–${sizes[sizes.length - 1]}` : "";
-    const status    = data.available ? "active" : "out_of_stock";
+    const isClearance = category === "clearance"
+      || tags.some(t => /clearance|sale/i.test(t));
+    const status = isClearance
+      ? "clearance"
+      : data.available ? "active" : "out_of_stock";
 
     entries.push({
       productName:    product.title,
@@ -211,11 +215,25 @@ export async function POST() {
       );
     }
 
+    // Products in DB with a h2uSku that Shopify no longer lists → archived
+    const shopifySkus = new Set([...shopifyMap.keys()]);
+    const toArchive = existing.filter(
+      e => e.h2uSku && !shopifySkus.has(e.h2uSku.toUpperCase())
+    );
+    for (let i = 0; i < toArchive.length; i += BATCH) {
+      await prisma.$transaction(
+        toArchive.slice(i, i + BATCH).map(({ id }) =>
+          prisma.productLibrary.update({ where: { id }, data: { status: "archived" } })
+        )
+      );
+    }
+
     return NextResponse.json({
       shopifyProducts: products.length,
       shopifyColorVariants: shopifyMap.size,
       created: toCreate.length,
       updated: toUpdate.length,
+      archived: toArchive.length,
     });
   } catch (err: any) {
     console.error("Shopify sync error:", err);

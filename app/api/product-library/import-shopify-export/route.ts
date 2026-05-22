@@ -69,15 +69,6 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    // Derive status from inventory unless it's a special status that shouldn't be overridden
-    const keepStatus = ["clearance", "archived", "draft"].includes(lib.status ?? "");
-    let newStatus: string | undefined;
-    if (!keepStatus) {
-      if (inventoryTotal === 0)       newStatus = "out_of_stock";
-      else if (inventoryTotal <= 10)  newStatus = "low_stock";
-      else                            newStatus = "active";
-    }
-
     await prisma.productLibrary.update({
       where: { id: lib.id },
       data: {
@@ -86,7 +77,6 @@ export async function POST(req: NextRequest) {
         warehouseQty,
         sizeInventory:   JSON.stringify(sizeInventory),
         outletInventory: JSON.stringify(outletInventory),
-        ...(newStatus ? { status: newStatus } : {}),
       },
     });
     updated++;
