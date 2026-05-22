@@ -1535,13 +1535,25 @@ function PurchaseOrdersContent() {
                           ) : (
                             <span className="text-xs text-gray-400">on time</span>
                           )}
-                          <button
-                            onClick={e => deletePO(p.id, p.poNumber, e)}
-                            title={`Delete ${p.poNumber}`}
-                            className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors shrink-0"
-                          >
-                            <Trash2 size={12} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <a
+                              href={`/api/purchase-orders/${p.id}/pdf`}
+                              target="_blank"
+                              rel="noopener"
+                              title={`Download PDF for ${p.poNumber}`}
+                              onClick={e => e.stopPropagation()}
+                              className="p-1 text-gray-300 hover:text-brand-600 hover:bg-brand-50 rounded transition-colors shrink-0"
+                            >
+                              <Download size={12} />
+                            </a>
+                            <button
+                              onClick={e => deletePO(p.id, p.poNumber, e)}
+                              title={`Delete ${p.poNumber}`}
+                              className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors shrink-0"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         </div>
                       </td>
                     </tr>
