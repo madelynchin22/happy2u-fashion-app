@@ -118,10 +118,11 @@ function extractColorEntries(product: any): ColorEntry[] {
     const sizes     = data.sizes.sort((a, b) => parseInt(a) - parseInt(b));
     const sizeRange = sizes.length ? `${sizes[0]}–${sizes[sizes.length - 1]}` : "";
     const isClearance = category === "clearance"
-      || tags.some(t => /clearance|sale/i.test(t));
-    const status = isClearance
-      ? "clearance"
-      : data.available ? "active" : "out_of_stock";
+      || tags.some(t => /clearance/i.test(t));
+    // Don't use Shopify's `available` flag for out_of_stock — that reflects online
+    // purchase availability, not physical inventory. Inventory-based statuses
+    // (out_of_stock / low_stock) are set by the Excel import instead.
+    const status = isClearance ? "clearance" : "active";
 
     entries.push({
       productName:    product.title,
