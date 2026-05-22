@@ -100,7 +100,7 @@ export function PurchaseOrderPDF({ po }: { po: any }) {
   const groupMap = new Map<string, { modelKey: string; supplierSku: string; items: any[] }>();
   const groupOrder: string[] = [];
   for (const item of items) {
-    const modelKey = item.mainSku || item.h2uSku?.replace(/[A-Z]+$/, "") || item.supplierSku || item.h2uSku || "";
+    const modelKey = item.h2uSku?.replace(/[A-Z]+$/, "") || item.supplierSku || item.h2uSku || "";
     const displaySku = item.supplierSku || item.mainSku || modelKey || item.h2uSku || "";
     if (!groupMap.has(modelKey)) {
       groupMap.set(modelKey, { modelKey, supplierSku: displaySku, items: [] });
