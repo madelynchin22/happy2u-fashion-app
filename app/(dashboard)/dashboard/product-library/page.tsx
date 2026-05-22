@@ -30,16 +30,14 @@ const SHOE_SIZES = ["36","37","38","39","40","41","42"];
 const CATS = ["heels","flats","sandals","boots","sneakers","wedges","bags","accessories","shoe_care","clearance","keychain","merchandiser"];
 const PAGE_SIZE = 50;
 
-type StatusKey = "all" | "draft" | "active" | "low_stock" | "out_of_stock" | "clearance" | "archived";
+type StatusKey = "all" | "draft" | "active" | "clearance" | "archived";
 
 const STATUS_TABS: { key: StatusKey; label: string; dot: string; card: string; text: string; subtext: string; badge: string }[] = [
-  { key:"all",          label:"All SKUs",     dot:"bg-gray-400",    card:"bg-white border-gray-300",         text:"text-gray-900",    subtext:"text-gray-400",    badge:"bg-gray-100 text-gray-600 ring-gray-200"     },
-  { key:"draft",        label:"Draft",        dot:"bg-violet-400",  card:"bg-violet-50 border-violet-300",   text:"text-violet-800",  subtext:"text-violet-500",  badge:"bg-violet-50 text-violet-700 ring-violet-200" },
-  { key:"active",       label:"Active",       dot:"bg-teal-500",    card:"bg-teal-50 border-teal-300",       text:"text-teal-800",    subtext:"text-teal-500",    badge:"bg-teal-50 text-teal-700 ring-teal-200"      },
-  { key:"low_stock",    label:"Low Stock",    dot:"bg-amber-400",   card:"bg-amber-50 border-amber-300",     text:"text-amber-800",   subtext:"text-amber-500",   badge:"bg-amber-50 text-amber-700 ring-amber-200"   },
-  { key:"out_of_stock", label:"Out of Stock", dot:"bg-gray-400",    card:"bg-gray-100 border-gray-300",      text:"text-gray-700",    subtext:"text-gray-500",    badge:"bg-gray-100 text-gray-600 ring-gray-200"     },
-  { key:"clearance",    label:"Clearance",    dot:"bg-red-400",     card:"bg-red-50 border-red-300",         text:"text-red-800",     subtext:"text-red-400",     badge:"bg-red-50 text-red-600 ring-red-200"         },
-  { key:"archived",     label:"Archived",     dot:"bg-slate-400",   card:"bg-slate-50 border-slate-300",     text:"text-slate-700",   subtext:"text-slate-400",   badge:"bg-slate-100 text-slate-600 ring-slate-200"  },
+  { key:"all",       label:"All SKUs",  dot:"bg-gray-400",   card:"bg-white border-gray-300",       text:"text-gray-900",   subtext:"text-gray-400",   badge:"bg-gray-100 text-gray-600 ring-gray-200"     },
+  { key:"draft",     label:"Draft",     dot:"bg-violet-400", card:"bg-violet-50 border-violet-300", text:"text-violet-800", subtext:"text-violet-500", badge:"bg-violet-50 text-violet-700 ring-violet-200" },
+  { key:"active",    label:"Active",    dot:"bg-teal-500",   card:"bg-teal-50 border-teal-300",     text:"text-teal-800",   subtext:"text-teal-500",   badge:"bg-teal-50 text-teal-700 ring-teal-200"      },
+  { key:"clearance", label:"Clearance", dot:"bg-red-400",    card:"bg-red-50 border-red-300",       text:"text-red-800",    subtext:"text-red-400",    badge:"bg-red-50 text-red-600 ring-red-200"         },
+  { key:"archived",  label:"Archived",  dot:"bg-slate-400",  card:"bg-slate-50 border-slate-300",   text:"text-slate-700",  subtext:"text-slate-400",  badge:"bg-slate-100 text-slate-600 ring-slate-200"  },
 ];
 
 const BLANK_FORM = {
@@ -227,7 +225,7 @@ export default function ProductLibraryPage() {
 
   // Counts per status — by unique Main SKU group (not individual colour entries)
   const counts = useMemo(() => {
-    const sets: Record<string, Set<string>> = { all: new Set(), draft: new Set(), active: new Set(), low_stock: new Set(), out_of_stock: new Set(), clearance: new Set(), archived: new Set() };
+    const sets: Record<string, Set<string>> = { all: new Set(), draft: new Set(), active: new Set(), clearance: new Set(), archived: new Set() };
     for (const it of allItems) {
       const gk = it.mainSku ? `sku:${it.mainSku}` : it.sampleOrderId ? `sample:${it.sampleOrderId}` : `single:${it.id}`;
       sets.all.add(gk);
@@ -258,7 +256,7 @@ export default function ProductLibraryPage() {
   }, [allItems, activeTab]);
 
   // Status sort order for the "All SKUs" view — drafts first so pending SKUs are visible
-  const STATUS_ORDER: Record<string, number> = { draft: 0, active: 1, low_stock: 2, out_of_stock: 3, clearance: 4, archived: 5 };
+  const STATUS_ORDER: Record<string, number> = { draft: 0, active: 1, clearance: 2, archived: 3 };
 
   // Filtered + sorted list for current tab + secondary filters
   const filtered = useMemo(() => {
@@ -609,7 +607,7 @@ export default function ProductLibraryPage() {
       )}
 
       {/* ── Status tab cards ── */}
-      <div className="grid grid-cols-6 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         {STATUS_TABS.map(tab => {
           const count  = counts[tab.key] ?? 0;
           const pct    = counts.all > 0 ? Math.round(count / counts.all * 100) : 0;

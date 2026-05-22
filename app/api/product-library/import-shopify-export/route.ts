@@ -69,13 +69,6 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    // Recalculate status from actual inventory; preserve clearance/archived/draft
-    const keepStatus = ["clearance", "archived", "draft"].includes(lib.status ?? "");
-    const newStatus = keepStatus ? undefined
-      : inventoryTotal === 0     ? "out_of_stock"
-      : inventoryTotal <= 10     ? "low_stock"
-      :                            "active";
-
     await prisma.productLibrary.update({
       where: { id: lib.id },
       data: {
@@ -84,7 +77,6 @@ export async function POST(req: NextRequest) {
         warehouseQty,
         sizeInventory:   JSON.stringify(sizeInventory),
         outletInventory: JSON.stringify(outletInventory),
-        ...(newStatus ? { status: newStatus } : {}),
       },
     });
     updated++;
