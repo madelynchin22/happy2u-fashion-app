@@ -12,10 +12,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "poNumbers and status required" }, { status: 400 });
   }
 
-  const result = await prisma.purchaseOrder.updateMany({
+  // First find them so we can confirm what matched
+  const found = await prisma.purchaseOrder.findMany({
     where: { poNumber: { in: poNumbers } },
-    data: { status },
+    select: { id: true, poNumber: true, status: true },
   });
 
-  return NextResponse.json({ updated: result.count });
+  if (!found.length) {
+    // Return all PO numbers so user can see what actually exists
+    const all = await prisma.purchaseOrder.findMany({
+      select: { poNumber: true, status: true },
+      orderBy: { poNumber: "asc" },
+    });
+    return NextResponse.json({ updated: 0, found: [], allPoNumbers: all });
+  }
+
+  await prisma.purchaseOrder.updateMany({
+    where: { id: { in: found.map(p => p.id) } },
+    data: { status, date: new Date() },
+  });
+
+  return NextResponse.json({ updated: found.length, updatedPos: found.map(p => p.poNumber) });
 }
