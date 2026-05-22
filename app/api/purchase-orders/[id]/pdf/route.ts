@@ -76,6 +76,20 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
   // Brand comes from ProductLibrary.brand (synced from Shopify product.vendor field)
   const rawItems: any[] = poRaw.items ?? [];
 
+  // ── Fallback photo lookup: match supplierSku / h2uSku to ProductLibrary ──
+  // Used when there is no sampleOrderId or colorPhotoMap doesn't have a match.
+  const allItemSkus = [...new Set(
+    rawItems.flatMap(i => [i.h2uSku, i.supplierSku].filter(Boolean) as string[])
+  )];
+  const skuLibEntries = allItemSkus.length
+    ? await prisma.productLibrary.findMany({
+        where: { h2uSku: { in: allItemSkus } },
+        select: { h2uSku: true, shoePhotoUrl: true, mainSku: true, colorCode: true, productName: true, brand: true },
+      })
+    : [];
+  // Key by h2uSku so we can look up by item.h2uSku or item.supplierSku (often identical)
+  const skuLibMap = new Map(skuLibEntries.map(l => [l.h2uSku, l]));
+
   // For items without a brand, look it up from ProductLibrary via h2uSku
   const skusNeedingBrand = rawItems.filter(i => !i.brand && i.h2uSku).map(i => i.h2uSku as string);
   const libBrands = skusNeedingBrand.length
@@ -115,13 +129,18 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     items: await Promise.all(rawItems.map(async (item: any) => {
       const colorKey  = item.colorName?.toLowerCase() ?? "";
       const colourUri = colorKey ? colorPhotoMap.get(colorKey) ?? null : null;
-      const mainSku   = (colorKey ? mainSkuMap.get(colorKey)   : null) ?? item.mainSku   ?? null;
-      const colorCode = (colorKey ? colorCodeMap.get(colorKey) : null) ?? item.colorCode ?? null;
-      const brand     = item.brand ?? (item.h2uSku ? h2uToBrand.get(item.h2uSku) : null) ?? null;
+      // Fallback: look up ProductLibrary entry by h2uSku or supplierSku
+      const libEntry  = skuLibMap.get(item.h2uSku) ?? skuLibMap.get(item.supplierSku) ?? null;
+      const libPhotoUri = (!colourUri && libEntry?.shoePhotoUrl)
+        ? await toDataUri(libEntry.shoePhotoUrl)
+        : null;
+      const mainSku   = (colorKey ? mainSkuMap.get(colorKey)   : null) ?? item.mainSku   ?? libEntry?.mainSku   ?? null;
+      const colorCode = (colorKey ? colorCodeMap.get(colorKey) : null) ?? item.colorCode ?? libEntry?.colorCode ?? null;
+      const brand     = item.brand ?? (item.h2uSku ? h2uToBrand.get(item.h2uSku) : null) ?? libEntry?.brand ?? null;
       const assets    = brand ? vendorUriMap.get(brand) : null;
       return {
         ...item,
-        photoUrl:      colourUri ?? mainPhotoUri,
+        photoUrl:      colourUri ?? libPhotoUri ?? mainPhotoUri,
         mainSku,
         colorCode,
         brand,
