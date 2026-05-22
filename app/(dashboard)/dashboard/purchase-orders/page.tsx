@@ -1156,6 +1156,15 @@ function PurchaseOrdersContent() {
     fetch("/api/purchase-orders").then(r => r.json()).then(d => setPos(Array.isArray(d) ? d : []));
   }
 
+  async function quickSubmit(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    await fetch(`/api/purchase-orders/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "submitted", date: new Date().toISOString() }),
+    });
+    loadPos();
+  }
+
   useEffect(() => { loadPos(); }, []);
 
   // Auto-open a PO when ?open=<id> is in the URL
@@ -1537,6 +1546,15 @@ function PurchaseOrdersContent() {
                             <span className="text-xs text-gray-300">—</span>
                           ) : (
                             <span className="text-xs text-gray-400">on time</span>
+                          )}
+                          {p.status === "draft" && (
+                            <button
+                              onClick={e => quickSubmit(p.id, e)}
+                              title="Submit this PO"
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors shrink-0"
+                            >
+                              Submit
+                            </button>
                           )}
                           <button
                             onClick={e => deletePO(p.id, p.poNumber, e)}
