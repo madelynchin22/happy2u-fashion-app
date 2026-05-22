@@ -98,6 +98,7 @@ export default function ProductLibraryPage() {
   const [saving, setSaving]       = useState(false);
   const [importing, setImporting] = useState(false);
   const [syncing, setSyncing]     = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [missedSkus, setMissedSkus] = useState<string[]>([]);
   const [creatingPO, setCreatingPO] = useState<string | null>(null);
@@ -501,6 +502,24 @@ export default function ProductLibraryPage() {
     }
   }
 
+  async function recalculateStatuses() {
+    setRecalculating(true); setSyncResult(null); setMissedSkus([]);
+    try {
+      const res = await fetch("/api/product-library/recalculate-statuses", { method: "POST" });
+      const d = await res.json();
+      if (res.ok) {
+        setSyncResult(`✓ Updated ${d.updated} statuses (${d.total - d.updated} already correct)`);
+        fetch("/api/product-library").then(r => r.json()).then(setAllItems).catch(() => {});
+      } else {
+        setSyncResult(`✗ Recalculate failed: ${d.error ?? "unknown error"}`);
+      }
+    } catch (e: any) {
+      setSyncResult(`✗ Recalculate failed: ${e?.message ?? "unknown error"}`);
+    } finally {
+      setRecalculating(false);
+    }
+  }
+
   async function syncShopifyPhotos() {
     setSyncing(true); setSyncResult(null);
     try {
@@ -587,6 +606,11 @@ export default function ProductLibraryPage() {
           </button>
           <input ref={shopifyExportRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
             onChange={e => { const f = e.target.files?.[0]; if (f) importShopifyExport(f); e.target.value=""; }} />
+          <button onClick={recalculateStatuses} disabled={recalculating}
+            className="btn-secondary flex items-center gap-2 text-sm">
+            <RefreshCw size={14} className={recalculating ? "animate-spin" : ""} />
+            {recalculating ? "Updating…" : "Fix Statuses"}
+          </button>
           <button onClick={openAdd} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Product
           </button>
