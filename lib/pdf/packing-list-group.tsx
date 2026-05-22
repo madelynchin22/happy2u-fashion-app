@@ -213,11 +213,11 @@ export function GroupPackingListPDF({
                           <Text style={[S.td, { width: W.marking }]}>{marking}</Text>
                           {SIZES.map(s => (
                             <Text key={s} style={[S.td, S.tdCenter, { width: W.size }]}>
-                              {(alloc as any)[`qty${s}`] || ""}
+                              {(alloc as any)[`qty${s}`] ?? ""}
                             </Text>
                           ))}
                           <Text style={[S.td, S.tdBold, S.tdCenter, { width: W.pair }]}>
-                            {allocPairs || ""}
+                            {allocPairs}
                           </Text>
                           <Text style={[S.td, { width: W.delivery }]}>
                             {isFirst ? fmtDate(item.deliveryDate) : ""}
@@ -235,15 +235,15 @@ export function GroupPackingListPDF({
                         s + allocs.reduce((as: number, a: any) => as + ((a as any)[`qty${sz}`] || 0), 0), 0);
                       return (
                         <View key={`${item.id}-sub`} style={S.totalRow}>
-                          <Text style={[S.td, S.tdBold, { width: W.supSku }]}>{item.supplierSku ?? ""}</Text>
-                          <Text style={[S.td, S.tdBold, { width: W.h2uSku }]}>{item.h2uSku ?? ""}</Text>
-                          <Text style={[S.td, S.tdBold, { width: W.color }]}>{item.colorName ?? ""}</Text>
-                          <Text style={[S.td, S.tdBold, { width: W.marking }]}>TOTAL</Text>
+                          <Text style={[S.td, { width: W.supSku }]}></Text>
+                          <Text style={[S.td, { width: W.h2uSku }]}></Text>
+                          <Text style={[S.td, { width: W.color }]}></Text>
+                          <Text style={[S.td, { width: W.marking }]}></Text>
                           {SIZES.map(s => {
                             const t = allocs.reduce((sum: number, a: any) => sum + ((a as any)[`qty${s}`] || 0), 0);
-                            return <Text key={s} style={[S.td, S.tdBold, S.tdCenter, { width: W.size }]}>{t || ""}</Text>;
+                            return <Text key={s} style={[S.td, S.tdBold, S.tdCenter, { width: W.size }]}>{t}</Text>;
                           })}
-                          <Text style={[S.td, S.tdBold, S.tdCenter, { width: W.pair }]}>{colourTotal || ""}</Text>
+                          <Text style={[S.td, S.tdBold, S.tdCenter, { width: W.pair }]}>{colourTotal}</Text>
                           <Text style={[S.td, { width: W.delivery }]}></Text>
                           <Text style={[S.td, { width: W.remark }]}></Text>
                         </View>
