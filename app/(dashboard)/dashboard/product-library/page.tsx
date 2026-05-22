@@ -775,6 +775,7 @@ export default function ProductLibraryPage() {
                 const priceMax = prices.length ? Math.max(...prices) : null;
                 const firstPhoto = row.items.find(i => i.shoePhotoUrl)?.shoePhotoUrl;
                 const isDraftGroup = row.mainSku === null;
+                const groupCost = row.items.find(i => i.costRm != null)?.costRm ?? null;
 
                 return (
                   <React.Fragment key={row.groupKey}>
@@ -849,7 +850,9 @@ export default function ProductLibraryPage() {
                         </p>
                         <p className="text-[10px] text-gray-400">total</p>
                       </td>
-                      <td className="px-4 py-3 text-right text-xs text-gray-300">—</td>
+                      <td className="px-4 py-3 text-right text-xs text-gray-600">
+                        {groupCost != null ? `RM ${groupCost.toFixed(2)}` : <span className="text-gray-300">—</span>}
+                      </td>
                       {/* Price range */}
                       <td className="px-4 py-3 text-right">
                         {priceMin != null ? (
