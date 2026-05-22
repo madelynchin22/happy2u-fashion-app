@@ -109,6 +109,7 @@ export function PurchaseOrderPDF({ po }: { po: any }) {
     groupMap.get(modelKey)!.items.push(item);
   }
   const groups = groupOrder.map(k => groupMap.get(k)!);
+  console.log("[PO-PDF] groups:", groups.length, groups.map(g => g.modelKey + "=" + g.items.map((i:any)=>i.h2uSku).join(",")));
 
   const totalPairs = items.reduce((s, i) => s + (i.totalPairs ?? 0), 0);
   const totalPrice = items.reduce((s, i) => s + (i.lineTotal ?? 0), 0);
