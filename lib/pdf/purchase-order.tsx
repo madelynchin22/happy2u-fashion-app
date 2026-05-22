@@ -123,8 +123,8 @@ export function PurchaseOrderPDF({ po }: { po: any }) {
         {/* ── Page header ── */}
         <View style={S.pageHeader}>
           <View style={S.titleArea}>
-            <Text style={S.titleText}>PURCHASE ORDER</Text>
-            <Text style={{ fontSize: 5, color: "red" }}>{groups.length}G: {groups.map(g => g.modelKey + "[" + g.items.length + "]").join(" | ")}</Text>
+            <Text style={S.titleText}>PURCHASE ORDER [{groups.length}G]</Text>
+            <Text style={{ fontSize: 9, color: "red" }}>{groups.map(g => g.modelKey + "×" + g.items.length).join("  |  ")}</Text>
           </View>
 
           <View style={S.metaOuter}>
