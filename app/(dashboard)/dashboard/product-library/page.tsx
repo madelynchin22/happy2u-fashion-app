@@ -776,6 +776,16 @@ export default function ProductLibraryPage() {
                 const firstPhoto = row.items.find(i => i.shoePhotoUrl)?.shoePhotoUrl;
                 const isDraftGroup = row.mainSku === null;
                 const groupCost = row.items.find(i => i.costRm != null)?.costRm ?? null;
+                // Deduplicate colours by colorName for display (handles size-per-entry products like S1466)
+                const seenNames = new Set<string>();
+                const uniqueColours = row.items.filter(it => {
+                  const key = it.colorName || `_id_${it.id}`;
+                  if (seenNames.has(key)) return false;
+                  seenNames.add(key); return true;
+                });
+                // Only show colorCode if colorName is unique within the group
+                const colorNameCount = new Map<string, number>();
+                for (const it of row.items) colorNameCount.set(it.colorName ?? "", (colorNameCount.get(it.colorName ?? "") ?? 0) + 1);
 
                 return (
                   <React.Fragment key={row.groupKey}>
@@ -812,13 +822,14 @@ export default function ProductLibraryPage() {
                         <p className="font-bold text-gray-900 leading-tight">{row.items[0].productName}</p>
                         <p className="text-[11px] text-gray-400 mt-0.5 capitalize">{row.items[0].category ?? "—"}</p>
                         <div className="flex flex-wrap gap-2 mt-1.5">
-                          {row.items.map(it => {
+                          {uniqueColours.map(it => {
                             const dot = STATUS_TABS.find(t => t.key === it.status)?.dot ?? "bg-gray-300";
+                            const showCode = it.colorCode && (colorNameCount.get(it.colorName ?? "") ?? 1) === 1;
                             return (
                               <span key={it.id} className="inline-flex items-center gap-1 text-[11px] text-gray-600">
                                 <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
                                 {it.colorName || "—"}
-                                {it.colorCode && <span className="font-mono text-gray-400">[{it.colorCode}]</span>}
+                                {showCode && <span className="font-mono text-gray-400">[{it.colorCode}]</span>}
                               </span>
                             );
                           })}
@@ -827,7 +838,7 @@ export default function ProductLibraryPage() {
                       {/* Sizes summary */}
                       <td className="px-4 py-3">
                         <span className="text-xs text-gray-400">
-                          {row.items.length} colour{row.items.length > 1 ? "s" : ""}
+                          {uniqueColours.length} colour{uniqueColours.length > 1 ? "s" : ""}
                         </span>
                       </td>
                       {/* Status / Create PO */}
