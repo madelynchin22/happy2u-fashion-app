@@ -42,20 +42,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "renames array required" }, { status: 400 });
     }
 
-    // Verify all "from" POs exist and collect current state
+    // Fetch all MAY POs and match in memory — avoids exact-format sensitivity issues
     const fromNumbers = renames.map((r) => r.from);
-    const existing = await prisma.purchaseOrder.findMany({
-      where: { poNumber: { in: fromNumbers } },
+    const allMay = await prisma.purchaseOrder.findMany({
+      where: { poNumber: { startsWith: "PO-2026-MAY" } },
       include: { manufacturer: true },
+      orderBy: { poNumber: "asc" },
     });
+
+    const existing = allMay.filter((p) => fromNumbers.includes(p.poNumber));
 
     const missing = fromNumbers.filter((n) => !existing.find((e) => e.poNumber === n));
     if (missing.length) {
-      const all = await prisma.purchaseOrder.findMany({
-        select: { poNumber: true },
-        orderBy: { poNumber: "asc" },
-      });
-      return NextResponse.json({ error: "Some POs not found", missing, allPoNumbers: all }, { status: 404 });
+      return NextResponse.json({
+        error: "Some POs not found",
+        missing,
+        allPoNumbers: allMay.map((p) => p.poNumber),
+      }, { status: 404 });
     }
 
     const plan = renames.map((r) => {
