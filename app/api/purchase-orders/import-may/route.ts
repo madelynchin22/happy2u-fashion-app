@@ -139,23 +139,29 @@ export async function POST(req: NextRequest) {
     });
     const ids = mayPOs.map(p => p.id);
     let deleted = 0;
+    const deleteLog: string[] = [];
     if (ids.length) {
-      // Get all PO item IDs so we can delete DeliveryItem rows that reference them
+      // Get all PO item IDs
       const poItems = await prisma.purchaseOrderItem.findMany({
         where: { poId: { in: ids } },
         select: { id: true },
       });
       const itemIds = poItems.map(i => i.id);
+      deleteLog.push(`Found ${ids.length} POs, ${itemIds.length} items`);
 
-      // Delete in dependency order (most-dependent first)
       if (itemIds.length) {
-        await prisma.deliveryItem.deleteMany({ where: { poItemId: { in: itemIds } } });
-        await prisma.packingListItem.deleteMany({ where: { poItemId: { in: itemIds } } });
+        const d1 = await prisma.deliveryItem.deleteMany({ where: { poItemId: { in: itemIds } } });
+        deleteLog.push(`Deleted ${d1.count} deliveryItems`);
+        const d2 = await prisma.packingListItem.deleteMany({ where: { poItemId: { in: itemIds } } });
+        deleteLog.push(`Deleted ${d2.count} packingListItems`);
       }
-      await prisma.shipmentItem.deleteMany({ where: { poId: { in: ids } } });
-      await prisma.packingList.deleteMany({ where: { poId: { in: ids } } });
+      const d3 = await prisma.shipmentItem.deleteMany({ where: { poId: { in: ids } } });
+      deleteLog.push(`Deleted ${d3.count} shipmentItems`);
+      const d4 = await prisma.packingList.deleteMany({ where: { poId: { in: ids } } });
+      deleteLog.push(`Deleted ${d4.count} packingLists`);
       const result = await prisma.purchaseOrder.deleteMany({ where: { id: { in: ids } } });
       deleted = result.count;
+      deleteLog.push(`Deleted ${deleted} purchaseOrders`);
     }
 
     // ── 2. Create each PO from Excel ─────────────────────────────────────────
@@ -213,7 +219,7 @@ export async function POST(req: NextRequest) {
       log.push(`✓ ${cfg.poNumber} (${cfg.mfrName}) — ${items.length} SKUs, ${totalPairs} pairs, ¥${totalPrice}`);
     }
 
-    return NextResponse.json({ deleted, created: log.filter(l => l.startsWith("✓")).length, log });
+    return NextResponse.json({ deleted, created: log.filter(l => l.startsWith("✓")).length, log, deleteLog });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? String(err) }, { status: 500 });
   }

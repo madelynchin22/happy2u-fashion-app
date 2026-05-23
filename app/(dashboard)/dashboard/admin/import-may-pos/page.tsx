@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 export default function ImportMayPosPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ deleted: number; created: number; log: string[] } | null>(null);
+  const [result, setResult] = useState<{ deleted: number; created: number; log: string[]; deleteLog?: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleImport() {
@@ -21,7 +21,7 @@ export default function ImportMayPosPage() {
 
       const res = await fetch("/api/purchase-orders/import-may", { method: "POST", body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? JSON.stringify(data));
+      if (!res.ok) throw new Error(JSON.stringify(data, null, 2));
       setResult(data);
     } catch (e: any) {
       setError(e.message);
@@ -66,6 +66,14 @@ export default function ImportMayPosPage() {
           <p className="font-semibold text-green-700 mb-2">
             Done — deleted {result.deleted} old POs, created {result.created} new POs
           </p>
+          {result.deleteLog && result.deleteLog.length > 0 && (
+            <div className="mb-2">
+              <p className="text-xs font-semibold text-gray-500 mb-1">Delete log:</p>
+              <ul className="space-y-0.5 text-xs font-mono text-gray-600">
+                {result.deleteLog.map((line, i) => <li key={i}>{line}</li>)}
+              </ul>
+            </div>
+          )}
           <ul className="space-y-1 text-xs font-mono">
             {result.log.map((line, i) => (
               <li key={i} className={line.startsWith("✓") ? "text-green-700" : "text-orange-600"}>
