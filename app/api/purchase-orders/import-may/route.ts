@@ -140,6 +140,18 @@ export async function POST(req: NextRequest) {
     const ids = mayPOs.map(p => p.id);
     let deleted = 0;
     if (ids.length) {
+      // Get all PO item IDs so we can delete DeliveryItem rows that reference them
+      const poItems = await prisma.purchaseOrderItem.findMany({
+        where: { poId: { in: ids } },
+        select: { id: true },
+      });
+      const itemIds = poItems.map(i => i.id);
+
+      // Delete in dependency order (most-dependent first)
+      if (itemIds.length) {
+        await prisma.deliveryItem.deleteMany({ where: { poItemId: { in: itemIds } } });
+        await prisma.packingListItem.deleteMany({ where: { poItemId: { in: itemIds } } });
+      }
       await prisma.shipmentItem.deleteMany({ where: { poId: { in: ids } } });
       await prisma.packingList.deleteMany({ where: { poId: { in: ids } } });
       const result = await prisma.purchaseOrder.deleteMany({ where: { id: { in: ids } } });
