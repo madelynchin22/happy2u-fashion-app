@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-// Desired final assignment: poNumber → supplierName (in order)
+// Desired final assignment: poNumber → supplier (in order)
 // Where a supplier appears twice, earlier slot gets the lower-numbered current PO.
 const DESIRED: { poNumber: string; supplier: string }[] = [
   { poNumber: "PO-2026-MAY01", supplier: "Nancy" },
@@ -15,14 +15,14 @@ const DESIRED: { poNumber: string; supplier: string }[] = [
   { poNumber: "PO-2026-MAY09", supplier: "Ms Sweet" },
 ];
 
-type CurrentPO = { id: string; poNumber: string; supplierName: string };
+type CurrentPO = { id: string; poNumber: string; supplier: string };
 type Rename = { from: string; to: string; supplier: string };
 
 function computeRenames(current: CurrentPO[]): Rename[] {
   // Group current POs by supplier name (normalised to lowercase for matching)
   const bySupplier: Record<string, CurrentPO[]> = {};
   for (const po of current) {
-    const key = po.supplierName?.toLowerCase().trim() ?? "";
+    const key = po.supplier?.toLowerCase().trim() ?? "";
     bySupplier[key] = [...(bySupplier[key] ?? []), po];
   }
   // Sort each group by current poNumber so first occurrence gets the lower slot
@@ -40,7 +40,7 @@ function computeRenames(current: CurrentPO[]): Rename[] {
     const po = bySupplier[key]?.[idx];
     if (!po) continue;
     if (po.poNumber !== slot.poNumber) {
-      renames.push({ from: po.poNumber, to: slot.poNumber, supplier: po.supplierName });
+      renames.push({ from: po.poNumber, to: slot.poNumber, supplier: po.supplier });
     }
   }
   return renames;
@@ -148,7 +148,7 @@ export default function ReorderPOsPage() {
                 return (
                   <tr key={po.id}>
                     <td className="p-2 border font-mono">{po.poNumber}</td>
-                    <td className="p-2 border">{po.supplierName}</td>
+                    <td className="p-2 border">{po.supplier}</td>
                     <td className="p-2 border">
                       {rename ? (
                         <span className="text-blue-700 font-mono">→ {rename.to}</span>
@@ -197,7 +197,7 @@ export default function ReorderPOsPage() {
           <div className="mt-2 space-y-1">
             {result?.renamed?.map((r: any) => (
               <div key={r.id} className="font-mono">
-                {r.from} ({r.supplierName}) → {r.to}
+                {r.from} ({r.supplier}) → {r.to}
               </div>
             ))}
           </div>

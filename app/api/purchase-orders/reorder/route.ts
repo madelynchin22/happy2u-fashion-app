@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
 
     const pos = await prisma.purchaseOrder.findMany({
       where: { poNumber: { startsWith: "PO-2026-MAY" } },
-      select: { id: true, poNumber: true, supplierName: true },
+      select: { id: true, poNumber: true, supplier: true },
       orderBy: { poNumber: "asc" },
     });
     return NextResponse.json({ pos });
@@ -41,13 +41,13 @@ export async function POST(req: NextRequest) {
     const fromNumbers = renames.map((r) => r.from);
     const existing = await prisma.purchaseOrder.findMany({
       where: { poNumber: { in: fromNumbers } },
-      select: { id: true, poNumber: true, supplierName: true },
+      select: { id: true, poNumber: true, supplier: true },
     });
 
     const missing = fromNumbers.filter((n) => !existing.find((e) => e.poNumber === n));
     if (missing.length) {
       const all = await prisma.purchaseOrder.findMany({
-        select: { poNumber: true, supplierName: true },
+        select: { poNumber: true, supplier: true },
         orderBy: { poNumber: "asc" },
       });
       return NextResponse.json({ error: "Some POs not found", missing, allPoNumbers: all }, { status: 404 });
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
 
     const plan = renames.map((r) => {
       const po = existing.find((e) => e.poNumber === r.from)!;
-      return { id: po.id, from: r.from, to: r.to, supplierName: po.supplierName };
+      return { id: po.id, from: r.from, to: r.to, supplier: po.supplier };
     });
 
     if (dryRun) {
