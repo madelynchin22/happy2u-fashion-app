@@ -1,9 +1,8 @@
 "use client";
 import { useState } from "react";
 
-// Desired final assignment: poNumber → supplier (in order)
-// Where a supplier appears twice, earlier slot gets the lower-numbered current PO.
-const DESIRED: { poNumber: string; supplier: string }[] = [
+// Desired final assignment (for display only)
+const DESIRED = [
   { poNumber: "PO-2026-MAY01", supplier: "Nancy" },
   { poNumber: "PO-2026-MAY02", supplier: "Anna" },
   { poNumber: "PO-2026-MAY03", supplier: "Zhang Sheng" },
@@ -15,57 +14,31 @@ const DESIRED: { poNumber: string; supplier: string }[] = [
   { poNumber: "PO-2026-MAY09", supplier: "Ms Sweet" },
 ];
 
-type CurrentPO = { id: string; poNumber: string; supplier: string };
-type Rename = { from: string; to: string; supplier: string };
-
-function computeRenames(current: CurrentPO[]): Rename[] {
-  // Group current POs by supplier name (normalised to lowercase for matching)
-  const bySupplier: Record<string, CurrentPO[]> = {};
-  for (const po of current) {
-    const key = po.supplier?.toLowerCase().trim() ?? "";
-    bySupplier[key] = [...(bySupplier[key] ?? []), po];
-  }
-  // Sort each group by current poNumber so first occurrence gets the lower slot
-  for (const key of Object.keys(bySupplier)) {
-    bySupplier[key].sort((a, b) => a.poNumber.localeCompare(b.poNumber));
-  }
-
-  const usedSupplier: Record<string, number> = {};
-  const renames: Rename[] = [];
-
-  for (const slot of DESIRED) {
-    const key = slot.supplier.toLowerCase().trim();
-    const idx = usedSupplier[key] ?? 0;
-    usedSupplier[key] = idx + 1;
-    const po = bySupplier[key]?.[idx];
-    if (!po) continue;
-    if (po.poNumber !== slot.poNumber) {
-      renames.push({ from: po.poNumber, to: slot.poNumber, supplier: po.supplier });
-    }
-  }
-  return renames;
-}
+// Explicit renames — derived from known current state (Image screenshot)
+const RENAMES = [
+  { from: "PO-2026-MAY01", to: "PO-2026-MAY03", note: "Zhang Sheng → slot 03" },
+  { from: "PO-2026-MAY02", to: "PO-2026-MAY01", note: "Nancy → slot 01" },
+  { from: "PO-2026-MAY03", to: "PO-2026-MAY02", note: "Anna → slot 02" },
+];
 
 export default function ReorderPOsPage() {
-  const [current, setCurrent] = useState<CurrentPO[] | null>(null);
-  const [renames, setRenames] = useState<Rename[]>([]);
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<"idle" | "preview" | "done">("idle");
 
-  async function loadAndPreview() {
+  async function preview() {
     setLoading(true);
     setError(null);
-    setResult(null);
     try {
-      const res = await fetch("/api/purchase-orders/reorder");
+      const res = await fetch("/api/purchase-orders/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ renames: RENAMES.map(({ from, to }) => ({ from, to })), dryRun: true }),
+      });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to load POs");
-      const pos: CurrentPO[] = data.pos;
-      setCurrent(pos);
-      const computed = computeRenames(pos);
-      setRenames(computed);
+      if (!res.ok) throw new Error(data.error ?? JSON.stringify(data));
+      setResult(data);
       setStep("preview");
     } catch (e: any) {
       setError(e.message);
@@ -74,19 +47,17 @@ export default function ReorderPOsPage() {
     }
   }
 
-  async function applyRenames() {
-    if (!renames.length) return;
+  async function apply() {
     setLoading(true);
     setError(null);
     try {
-      const payload = renames.map((r) => ({ from: r.from, to: r.to }));
       const res = await fetch("/api/purchase-orders/reorder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ renames: payload }),
+        body: JSON.stringify({ renames: RENAMES.map(({ from, to }) => ({ from, to })) }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Request failed");
+      if (!res.ok) throw new Error(data.error ?? JSON.stringify(data));
       setResult(data);
       setStep("done");
     } catch (e: any) {
@@ -97,13 +68,33 @@ export default function ReorderPOsPage() {
   }
 
   return (
-    <div className="p-8 max-w-3xl">
+    <div className="p-8 max-w-2xl">
       <h1 className="text-2xl font-bold mb-1">Reorder May 2026 PO Numbers</h1>
       <p className="text-gray-500 mb-6 text-sm">
-        Reassigns PO numbers so each supplier gets the correct MAY slot.
+        Swaps MAY01/02/03 to correct supplier order. MAY04–09 are already correct.
       </p>
 
-      <h2 className="font-semibold text-sm mb-2 text-gray-700">Target assignment</h2>
+      <h2 className="font-semibold text-sm mb-2 text-gray-700">Changes to apply</h2>
+      <table className="w-full text-sm border mb-6">
+        <thead>
+          <tr className="bg-gray-50 text-left">
+            <th className="p-2 border">Current PO</th>
+            <th className="p-2 border">New PO</th>
+            <th className="p-2 border">Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {RENAMES.map((r) => (
+            <tr key={r.from}>
+              <td className="p-2 border font-mono text-red-600">{r.from}</td>
+              <td className="p-2 border font-mono text-green-600">{r.to}</td>
+              <td className="p-2 border text-gray-500 text-xs">{r.note}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2 className="font-semibold text-sm mb-2 text-gray-700">Full target assignment</h2>
       <table className="w-full text-sm border mb-6">
         <thead>
           <tr className="bg-gray-50 text-left">
@@ -113,7 +104,7 @@ export default function ReorderPOsPage() {
         </thead>
         <tbody>
           {DESIRED.map((d) => (
-            <tr key={d.poNumber}>
+            <tr key={d.poNumber} className={RENAMES.some(r => r.to === d.poNumber || r.from === d.poNumber) ? "bg-yellow-50" : ""}>
               <td className="p-2 border font-mono">{d.poNumber}</td>
               <td className="p-2 border">{d.supplier}</td>
             </tr>
@@ -123,89 +114,54 @@ export default function ReorderPOsPage() {
 
       {step === "idle" && (
         <button
-          onClick={loadAndPreview}
+          onClick={preview}
           disabled={loading}
           className="px-4 py-2 bg-gray-100 border rounded hover:bg-gray-200 text-sm"
         >
-          {loading ? "Loading..." : "Preview Changes"}
+          {loading ? "Checking..." : "Preview Changes"}
         </button>
       )}
 
-      {step === "preview" && (
+      {step === "preview" && result?.plan && (
         <>
-          <h2 className="font-semibold text-sm mb-2 text-gray-700">Current state (all MAY POs)</h2>
-          <table className="w-full text-sm border mb-4">
-            <thead>
-              <tr className="bg-gray-50 text-left">
-                <th className="p-2 border">Current PO</th>
-                <th className="p-2 border">Supplier</th>
-                <th className="p-2 border">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(current ?? []).map((po) => {
-                const rename = renames.find((r) => r.from === po.poNumber);
-                return (
-                  <tr key={po.id}>
-                    <td className="p-2 border font-mono">{po.poNumber}</td>
-                    <td className="p-2 border">{po.supplier}</td>
-                    <td className="p-2 border">
-                      {rename ? (
-                        <span className="text-blue-700 font-mono">→ {rename.to}</span>
-                      ) : (
-                        <span className="text-gray-400">no change</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {renames.length === 0 ? (
-            <p className="text-green-700 font-semibold text-sm">
-              All PO numbers already match the target — nothing to change.
-            </p>
-          ) : (
-            <>
-              <p className="text-sm text-gray-600 mb-3">
-                {renames.length} PO(s) will be renamed. Click Confirm to apply.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setStep("idle")}
-                  className="px-4 py-2 bg-gray-100 border rounded hover:bg-gray-200 text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={applyRenames}
-                  disabled={loading}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                >
-                  {loading ? "Applying..." : "Confirm & Apply"}
-                </button>
-              </div>
-            </>
-          )}
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm mb-4">
+            <p className="font-semibold text-blue-700 mb-2">Ready to apply — {result.plan.length} renames:</p>
+            <ul className="space-y-1">
+              {result.plan.map((p: any) => (
+                <li key={p.id} className="font-mono">
+                  {p.from}{p.supplier ? ` (${p.supplier})` : ""} → <span className="text-green-700">{p.to}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={() => setStep("idle")} className="px-4 py-2 bg-gray-100 border rounded text-sm">
+              Cancel
+            </button>
+            <button
+              onClick={apply}
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+            >
+              {loading ? "Applying..." : "Confirm & Apply"}
+            </button>
+          </div>
         </>
       )}
 
       {step === "done" && (
         <div className="p-3 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
-          Done! {result?.renamed?.length} PO(s) renamed successfully.
-          <div className="mt-2 space-y-1">
-            {result?.renamed?.map((r: any) => (
-              <div key={r.id} className="font-mono">
-                {r.from} ({r.supplier}) → {r.to}
-              </div>
-            ))}
-          </div>
+          <p className="font-semibold mb-1">Done! {result?.renamed?.length} POs renamed.</p>
+          {result?.renamed?.map((r: any) => (
+            <div key={r.id} className="font-mono">
+              {r.from} → {r.to}
+            </div>
+          ))}
         </div>
       )}
 
       {error && (
-        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm break-all">
           {error}
         </div>
       )}

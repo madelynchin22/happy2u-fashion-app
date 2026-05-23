@@ -11,10 +11,14 @@ export async function GET(req: NextRequest) {
 
     const pos = await prisma.purchaseOrder.findMany({
       where: { poNumber: { startsWith: "PO-2026-MAY" } },
-      select: { id: true, poNumber: true, manufacturer: { select: { name: true } } },
+      include: { manufacturer: true },
       orderBy: { poNumber: "asc" },
     });
-    const result = pos.map((p) => ({ id: p.id, poNumber: p.poNumber, supplier: p.manufacturer?.name ?? "" }));
+    const result = pos.map((p) => ({
+      id: p.id,
+      poNumber: p.poNumber,
+      supplier: p.manufacturer?.name ?? "",
+    }));
     return NextResponse.json({ pos: result });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? String(err) }, { status: 500 });
@@ -23,7 +27,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/purchase-orders/reorder
 // Renames PO numbers via a transaction using temp placeholders to avoid unique-constraint conflicts.
-// Body: { renames: [{ from: "PO-2026-MAY-01", to: "PO-2026-MAY-03" }, ...], dryRun?: boolean }
+// Body: { renames: [{ from: "PO-2026-MAY01", to: "PO-2026-MAY03" }, ...], dryRun?: boolean }
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -42,13 +46,13 @@ export async function POST(req: NextRequest) {
     const fromNumbers = renames.map((r) => r.from);
     const existing = await prisma.purchaseOrder.findMany({
       where: { poNumber: { in: fromNumbers } },
-      select: { id: true, poNumber: true, manufacturer: { select: { name: true } } },
+      include: { manufacturer: true },
     });
 
     const missing = fromNumbers.filter((n) => !existing.find((e) => e.poNumber === n));
     if (missing.length) {
       const all = await prisma.purchaseOrder.findMany({
-        select: { poNumber: true, supplier: true },
+        select: { poNumber: true },
         orderBy: { poNumber: "asc" },
       });
       return NextResponse.json({ error: "Some POs not found", missing, allPoNumbers: all }, { status: 404 });
