@@ -37,7 +37,7 @@ export default function ReorderPOsPage() {
         body: JSON.stringify({ renames: RENAMES.map(({ from, to }) => ({ from, to })), dryRun: true }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? JSON.stringify(data));
+      if (!res.ok) throw new Error(JSON.stringify(data, null, 2));
       setResult(data);
       setStep("preview");
     } catch (e: any) {
@@ -57,7 +57,7 @@ export default function ReorderPOsPage() {
         body: JSON.stringify({ renames: RENAMES.map(({ from, to }) => ({ from, to })) }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? JSON.stringify(data));
+      if (!res.ok) throw new Error(JSON.stringify(data, null, 2));
       setResult(data);
       setStep("done");
     } catch (e: any) {
