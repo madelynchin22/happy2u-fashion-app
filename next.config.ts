@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@react-pdf/renderer"],
   images: {
     remotePatterns: [
+      { protocol: "https", hostname: "happy2u-asset.oss-ap-southeast-8.aliyuncs.com" },
       { protocol: "https", hostname: "res.cloudinary.com" },
       { protocol: "https", hostname: "cdn.shopify.com" },
       { protocol: "https", hostname: "happy2u-app-production.up.railway.app" },
