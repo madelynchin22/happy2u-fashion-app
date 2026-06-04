@@ -16,11 +16,11 @@ export async function GET() {
         status: "active",
         sizeInventory: h2uSku === "S1491WUP"
           ? JSON.stringify({ "36": 1, "37": 0, "38": 2, "39": 5, "40": 5, "41": 7 })
-          : undefined,
+          : JSON.stringify({ "36": 3, "37": 5, "38": 1, "39": 3, "40": 4, "41": 5, "42": 0 }),
         availableSizes: h2uSku === "S1491WUP"
           ? JSON.stringify(["36", "37", "38", "39", "40", "41"])
-          : undefined,
-        inventoryTotal: h2uSku === "S1491WUP" ? 20 : undefined,
+          : JSON.stringify(["36", "37", "38", "39", "40", "41", "42"]),
+        inventoryTotal: h2uSku === "S1491WUP" ? 20 : 21,
       },
     });
 
