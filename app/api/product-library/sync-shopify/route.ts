@@ -5,7 +5,8 @@ import { prisma } from "@/lib/db";
 import { generateOrderNumber } from "@/lib/utils";
 
 const STORE = "https://shophappy2u.com";
-const SIZE_SUFFIX = /^(.*?)(3[5-9]|4[0-2])$/;
+// Matches size number with optional trailing letters: S1800H38 → S1800H, S1491W36UP → S1491WUP
+const SIZE_SUFFIX = /^(.*?)(3[5-9]|4[0-2])([A-Z]*)$/i;
 const MAIN_SKU_RE = /^(S\d{4})/i;
 
 async function fetchAllProducts() {
@@ -94,7 +95,8 @@ function extractColorEntries(product: any): ColorEntry[] {
     if (!raw) continue;
 
     const m = raw.match(SIZE_SUFFIX);
-    const baseSku   = (m ? m[1] : raw).toUpperCase();
+    // m[1]=prefix, m[2]=size digits, m[3]=trailing letters (e.g. "UP")
+    const baseSku   = (m ? m[1] + (m[3] ?? "") : raw).toUpperCase();
     const size      = m ? m[2] : null;
     const colorName = variant.option1 ?? "";
 
