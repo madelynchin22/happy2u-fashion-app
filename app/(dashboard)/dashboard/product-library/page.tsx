@@ -98,6 +98,9 @@ export default function ProductLibraryPage() {
   const [importing, setImporting] = useState(false);
   const [syncing, setSyncing]     = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [assigningMfr, setAssigningMfr] = useState(false);
+  const [mfrAssignResult, setMfrAssignResult] = useState<string | null>(null);
+  const mfrAssignRef = useRef<HTMLInputElement>(null);
   const [missedSkus, setMissedSkus] = useState<string[]>([]);
   const [creatingPO, setCreatingPO] = useState<string | null>(null);
 
@@ -553,6 +556,40 @@ export default function ProductLibraryPage() {
     }
   }
 
+  async function assignManufacturersFromExcel(file: File) {
+    setAssigningMfr(true);
+    setMfrAssignResult(null);
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws);
+
+      // Find SKU and manufacturer columns flexibly
+      const mapped = rows.map(r => {
+        const keys = Object.keys(r);
+        const skuKey = keys.find(k => /sku|style|code/i.test(k)) ?? keys[0];
+        const mfrKey = keys.find(k => /manuf|supplier|vendor|factory|brand|mfr/i.test(k)) ?? keys[1];
+        return { sku: String(r[skuKey] ?? "").trim(), manufacturerName: String(r[mfrKey] ?? "").trim() };
+      }).filter(r => r.sku && r.manufacturerName);
+
+      const res = await fetch("/api/product-library/assign-manufacturer", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mapped),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        const msg = `Updated ${d.updated} entries.${d.unknownMfr.length ? ` Unknown manufacturers: ${d.unknownMfr.slice(0,5).join(", ")}` : ""}${d.notFound.length ? ` SKUs not found: ${d.notFound.slice(0,5).join(", ")}` : ""}`;
+        setMfrAssignResult(msg);
+        fetch("/api/product-library").then(r => r.json()).then(setAllItems).catch(() => {});
+      } else {
+        setMfrAssignResult("Error: " + (d.error ?? "unknown"));
+      }
+    } finally {
+      setAssigningMfr(false);
+    }
+  }
+
   async function importExcel(file: File) {
     setImporting(true);
     const XLSX = await import("xlsx");
@@ -590,6 +627,12 @@ export default function ProductLibraryPage() {
           </button>
           <input ref={shopifyExportRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
             onChange={e => { const f = e.target.files?.[0]; if (f) importShopifyExport(f); e.target.value=""; }} />
+          <button onClick={() => mfrAssignRef.current?.click()} disabled={assigningMfr}
+            className="btn-secondary flex items-center gap-2 text-sm">
+            <Upload size={14} />{assigningMfr ? "Assigning…" : "Assign Manufacturers"}
+          </button>
+          <input ref={mfrAssignRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) assignManufacturersFromExcel(f); e.target.value=""; }} />
           <button onClick={openAdd} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Product
           </button>
@@ -598,6 +641,12 @@ export default function ProductLibraryPage() {
       {syncResult && (
         <div className={`px-4 py-2 rounded-lg text-sm ${syncResult.startsWith("✓") ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
           {syncResult}
+        </div>
+      )}
+      {mfrAssignResult && (
+        <div className={`px-4 py-2 rounded-lg text-sm flex items-center justify-between ${mfrAssignResult.startsWith("Error") ? "bg-red-50 text-red-700 border border-red-200" : "bg-green-50 text-green-700 border border-green-200"}`}>
+          <span>{mfrAssignResult}</span>
+          <button onClick={() => setMfrAssignResult(null)} className="ml-3 opacity-50 hover:opacity-100"><X size={14}/></button>
         </div>
       )}
       {missedSkus.length > 0 && (
