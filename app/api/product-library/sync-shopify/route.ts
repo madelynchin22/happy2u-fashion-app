@@ -170,8 +170,11 @@ export async function POST() {
     });
     const existingMap = new Map(existing.filter(e => e.h2uSku).map(e => [e.h2uSku!.toUpperCase(), e]));
 
-    // Get current count for libNumber generation
-    let libCount = await prisma.productLibrary.count();
+    // Use max existing libNumber sequence to avoid collisions when entries have been deleted
+    const maxLib = existing
+      .map(e => { const m = e.libNumber?.match(/(\d+)$/); return m ? parseInt(m[1]) : 0; })
+      .reduce((a, b) => Math.max(a, b), 0);
+    let libCount = Math.max(maxLib, existing.length);
 
     const toCreate: any[] = [];
     const toUpdate: { id: string; data: any }[] = [];
