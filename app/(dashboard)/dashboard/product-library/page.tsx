@@ -84,6 +84,7 @@ export default function ProductLibraryPage() {
   const [catF, setCatF]           = useState("");
   const [sizeF, setSizeF]         = useState("");
   const [colorF, setColorF]       = useState("");
+  const [mfrF, setMfrF]           = useState<"" | "none" | string>("");
   const [page, setPage]           = useState(1);
   const [expanded, setExpanded]       = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -104,7 +105,7 @@ export default function ProductLibraryPage() {
   type GroupColour = { id: string; colorName: string; colorCode: string; shoePhotoUrl: string; photoSideUrl: string; photoUpperUrl: string; photoDesignUrl: string; isNew?: boolean };
   const [groupModal, setGroupModal]   = useState(false);
   const [groupItems, setGroupItems]   = useState<PLItem[]>([]);
-  const [groupForm, setGroupForm]     = useState({ productName: "", mainSku: "", category: "", brand: "", season: "" });
+  const [groupForm, setGroupForm]     = useState({ productName: "", mainSku: "", category: "", brand: "", season: "", manufacturerId: "" });
   const [groupColours, setGroupColours] = useState<GroupColour[]>([]);
   const [savingGroup, setSavingGroup] = useState(false);
   const [pendingGroupUpload, setPendingGroupUpload] = useState<{ idx: number; field: string } | null>(null);
@@ -120,6 +121,7 @@ export default function ProductLibraryPage() {
       category: first.category ?? "",
       brand: first.brand ?? "Happy2U",
       season: first.season ?? "",
+      manufacturerId: first.manufacturer?.id ?? "",
     });
     setGroupColours(items.map(it => ({
       id: it.id,
@@ -145,6 +147,7 @@ export default function ProductLibraryPage() {
           category: groupForm.category || null,
           brand: groupForm.brand || null,
           season: groupForm.season || null,
+          manufacturerId: groupForm.manufacturerId || null,
           colorName: gc.colorName || null,
           colorCode: gc.colorCode || null,
           h2uSku: derivedH2u,
@@ -221,7 +224,7 @@ export default function ProductLibraryPage() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => { setPage(1); setExpanded(null); setExpandedGroups(new Set()); }, [activeTab, search, catF, sizeF, colorF]);
+  useEffect(() => { setPage(1); setExpanded(null); setExpandedGroups(new Set()); }, [activeTab, search, catF, sizeF, colorF, mfrF]);
 
   // Counts per status — by unique Main SKU group (not individual colour entries)
   const counts = useMemo(() => {
@@ -265,6 +268,8 @@ export default function ProductLibraryPage() {
       if (catF && it.category !== catF) return false;
       if (colorF && it.colorName !== colorF) return false;
       if (sizeF && (parseSizeInv(it.sizeInventory)[sizeF] ?? 0) <= 0) return false;
+      if (mfrF === "none" && it.manufacturer) return false;
+      if (mfrF && mfrF !== "none" && it.manufacturer?.id !== mfrF) return false;
       if (search) {
         const q = search.toLowerCase();
         const hay = [it.productName, it.h2uSku, it.supplierSku, it.colorName, it.category].filter(Boolean).join(" ").toLowerCase();
@@ -279,7 +284,7 @@ export default function ProductLibraryPage() {
       );
     }
     return result;
-  }, [allItems, activeTab, catF, colorF, sizeF, search]);
+  }, [allItems, activeTab, catF, colorF, sizeF, search, mfrF]);
 
   // Group by mainSku, then by sampleOrderId (drafts from same sample), then singles — for all tabs
   const displayRows = useMemo<DisplayRow[]>(() => {
@@ -315,10 +320,10 @@ export default function ProductLibraryPage() {
   const totalPages  = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
   const paginatedDisplay  = displayRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const hasSecondaryFilters = !!(catF || sizeF || colorF || search);
+  const hasSecondaryFilters = !!(catF || sizeF || colorF || search || mfrF);
   const currentTab = STATUS_TABS.find(t => t.key === activeTab)!;
 
-  function clearSecondary() { setCatF(""); setSizeF(""); setColorF(""); setSearch(""); }
+  function clearSecondary() { setCatF(""); setSizeF(""); setColorF(""); setSearch(""); setMfrF(""); }
 
   // Modal helpers
   function openAdd() { setEditId(null); setForm({ ...BLANK_FORM }); setModal(true); }
@@ -698,6 +703,16 @@ export default function ProductLibraryPage() {
               {allColors.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+          {mfrs.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Manufacturer</p>
+              <select className="input text-sm w-48" value={mfrF} onChange={e => setMfrF(e.target.value as typeof mfrF)}>
+                <option value="">All manufacturers</option>
+                <option value="none">— No manufacturer —</option>
+                {mfrs.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -812,7 +827,14 @@ export default function ProductLibraryPage() {
                       {/* Product + colours summary spans 3 cols (Product, Colour SKU, Colour) */}
                       <td className="px-4 py-3" colSpan={3}>
                         <p className="font-bold text-gray-900 leading-tight">{row.items[0].productName}</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5 capitalize">{row.items[0].category ?? "—"}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className="text-[11px] text-gray-400 capitalize">{row.items[0].category ?? "—"}</p>
+                          {row.items[0].manufacturer?.name && (
+                            <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                              {row.items[0].manufacturer.name}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex flex-wrap gap-2 mt-1.5">
                           {uniqueColours.map(it => {
                             const dot = STATUS_TABS.find(t => t.key === it.status)?.dot ?? "bg-gray-300";
@@ -1172,6 +1194,14 @@ export default function ProductLibraryPage() {
                   <input className="input text-sm" placeholder="SS2026" value={groupForm.season}
                     onChange={e => setGroupForm(f => ({ ...f, season: e.target.value }))} />
                 </div>
+              </div>
+              <div>
+                <label className="label text-xs">Manufacturer</label>
+                <select className="input text-sm" value={groupForm.manufacturerId}
+                  onChange={e => setGroupForm(f => ({ ...f, manufacturerId: e.target.value }))}>
+                  <option value="">— None —</option>
+                  {mfrs.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
               </div>
             </div>
 
