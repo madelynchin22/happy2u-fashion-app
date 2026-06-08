@@ -138,6 +138,108 @@ function totalCommittedRm(pos: PO[]): number {
     .reduce((s, p) => s + (p.fxRate ? p.totalPrice * p.fxRate : p.totalPrice * 0.62), 0);
 }
 
+// ─── Outlet PL Picker Modal ───────────────────────────────────────────────────
+
+function PlOutletPicker({
+  outlets,
+  baseUrl,
+  onClose,
+}: {
+  outlets: Outlet[];
+  baseUrl: string;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(outlets.map(o => o.id)));
+
+  function toggle(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (selected.size === outlets.length) setSelected(new Set());
+    else setSelected(new Set(outlets.map(o => o.id)));
+  }
+
+  function download() {
+    if (selected.size === 0) return;
+    const ids = [...selected].join(",");
+    const url = baseUrl + "&outlets=" + encodeURIComponent(ids);
+    const a = document.createElement("a");
+    a.href = url; a.target = "_blank"; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    onClose();
+  }
+
+  // Group by country
+  const countryLabels: Record<string, string> = { MY: "Malaysia", TH: "Thailand", CN: "China" };
+  const groups: Record<string, Outlet[]> = {};
+  for (const o of outlets) {
+    const c = o.country ?? "MY";
+    if (!groups[c]) groups[c] = [];
+    groups[c].push(o);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-[420px] max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="font-semibold text-gray-900 text-sm">Select outlets for Packing List</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Only ticked outlets will appear in the PDF</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+        </div>
+
+        <div className="overflow-y-auto px-5 py-3 space-y-4 flex-1">
+          {Object.entries(groups).map(([country, list]) => (
+            <div key={country}>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+                {countryLabels[country] ?? country}
+              </p>
+              <div className="space-y-1">
+                {list.map(o => (
+                  <label key={o.id} className="flex items-center gap-2.5 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(o.id)}
+                      onChange={() => toggle(o.id)}
+                      className="w-4 h-4 accent-green-600"
+                    />
+                    <span className="font-mono text-xs font-semibold text-gray-700 group-hover:text-gray-900">
+                      {o.marking}
+                    </span>
+                    {o.name && <span className="text-xs text-gray-400">{o.name}</span>}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-gray-50 rounded-b-xl">
+          <button onClick={toggleAll} className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2">
+            {selected.size === outlets.length ? "Deselect all" : "Select all"}
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400">{selected.size} / {outlets.length} selected</span>
+            <button
+              onClick={download}
+              disabled={selected.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Download size={14} /> Download PDF
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Summary Cards ────────────────────────────────────────────────────────────
 
 function SummaryCards({ pos, activeFilter, onFilter }: {
@@ -460,6 +562,7 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
   const [newColorInput, setNewColorInput] = useState("");
   const [outlets, setOutlets]   = useState<Outlet[]>([]);
   const [allocColorIdx, setAllocColorIdx] = useState(0);
+  const [detailPlPicker, setDetailPlPicker] = useState<{ baseUrl: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/outlets").then(r => r.json()).then(d => setOutlets(Array.isArray(d) ? d : [])).catch(() => {});
@@ -613,13 +716,13 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
         document.body.removeChild(a);
       }
       openDownload(`/api/purchase-orders/${id}/pdf`);
-      setTimeout(() => {
-        openDownload(
+      // Open outlet picker for PL download instead of auto-downloading
+      setDetailPlPicker({
+        baseUrl:
           `/api/purchase-orders/group-pdf-pl?ids=${id}` +
           `&group=${encodeURIComponent(fresh.poNumber ?? po?.poNumber ?? "")}` +
-          `&supplier=${encodeURIComponent(fresh.manufacturer?.name ?? po?.manufacturer?.name ?? "")}`
-        );
-      }, 800);
+          `&supplier=${encodeURIComponent(fresh.manufacturer?.name ?? po?.manufacturer?.name ?? "")}`,
+      });
     }
   }
 
@@ -686,6 +789,9 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
 
   return (
     <div className="bg-white overflow-hidden">
+      {detailPlPicker && outlets.length > 0 && (
+        <PlOutletPicker outlets={outlets} baseUrl={detailPlPicker.baseUrl} onClose={() => setDetailPlPicker(null)} />
+      )}
       {/* Header */}
       <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200">
         <div className="space-y-0.5">
@@ -716,10 +822,11 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
             <Download size={14} /> Download PO
           </a>
           {po && (
-            <a href={`/api/purchase-orders/group-pdf-pl?ids=${id}&group=${encodeURIComponent(po.poNumber)}&supplier=${encodeURIComponent(po.manufacturer.name)}`} target="_blank"
+            <button
+              onClick={() => setDetailPlPicker({ baseUrl: `/api/purchase-orders/group-pdf-pl?ids=${id}&group=${encodeURIComponent(po.poNumber)}&supplier=${encodeURIComponent(po.manufacturer.name)}` })}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-green-300 rounded-lg hover:bg-green-50 text-green-700">
               <Download size={14} /> Download PL
-            </a>
+            </button>
           )}
           {po.status === "draft" && !editing && (
             <button onClick={startEdit}
@@ -1147,6 +1254,8 @@ function PurchaseOrdersContent() {
   const [search, setSearch]                 = useState("");
   const [selectedId, setSelectedId]         = useState<string | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<string>("all");
+  const [allOutlets, setAllOutlets]         = useState<Outlet[]>([]);
+  const [plPicker, setPlPicker]             = useState<{ baseUrl: string } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
   const selectedMonth = searchParams.get("month") ?? "all";
@@ -1154,6 +1263,11 @@ function PurchaseOrdersContent() {
 
   function loadPos() {
     fetch("/api/purchase-orders").then(r => r.json()).then(d => setPos(Array.isArray(d) ? d : []));
+  }
+
+  function openPlPicker(baseUrl: string, e: React.MouseEvent) {
+    e.preventDefault(); e.stopPropagation();
+    setPlPicker({ baseUrl });
   }
 
   async function quickSubmit(id: string, e: React.MouseEvent) {
@@ -1165,7 +1279,10 @@ function PurchaseOrdersContent() {
     loadPos();
   }
 
-  useEffect(() => { loadPos(); }, []);
+  useEffect(() => {
+    loadPos();
+    fetch("/api/outlets").then(r => r.json()).then(d => setAllOutlets(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
 
   // Auto-open a PO when ?open=<id> is in the URL
   useEffect(() => {
@@ -1270,6 +1387,10 @@ function PurchaseOrdersContent() {
 
   return (
     <div className="space-y-4">
+      {plPicker && allOutlets.length > 0 && (
+        <PlOutletPicker outlets={allOutlets} baseUrl={plPicker.baseUrl} onClose={() => setPlPicker(null)} />
+      )}
+
       {/* Tab navigation */}
       <POTabs />
 
@@ -1449,10 +1570,10 @@ function PurchaseOrdersContent() {
                               className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium border border-brand-300 text-brand-700 bg-white rounded-lg hover:bg-brand-50 transition-colors">
                               <Download size={12} /> Download PO
                             </a>
-                            <a href={groupPlUrl} target="_blank"
+                            <button onClick={e => openPlPicker(groupPlUrl, e)}
                               className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium border border-green-300 text-green-700 bg-white rounded-lg hover:bg-green-50 transition-colors">
                               <Download size={12} /> Download PL
-                            </a>
+                            </button>
                           </div>
                         </div>
                       </td>

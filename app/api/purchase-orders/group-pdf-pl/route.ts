@@ -31,14 +31,18 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
-  const idsParam  = searchParams.get("ids") ?? "";
-  const groupCode = searchParams.get("group") ?? "PO-GROUP";
-  const supplier  = searchParams.get("supplier") ?? "";
+  const idsParam      = searchParams.get("ids") ?? "";
+  const groupCode     = searchParams.get("group") ?? "PO-GROUP";
+  const supplier      = searchParams.get("supplier") ?? "";
+  const outletsParam  = searchParams.get("outlets") ?? "";
 
   const ids = idsParam.split(",").map(s => s.trim()).filter(Boolean);
   if (ids.length === 0) return NextResponse.json({ error: "No PO IDs provided" }, { status: 400 });
 
-  const [pos, allOutlets] = await Promise.all([
+  // Outlet IDs selected by the user (empty = show all)
+  const selectedOutletIds = outletsParam ? new Set(outletsParam.split(",").map(s => s.trim()).filter(Boolean)) : null;
+
+  const [pos, allOutletsRaw] = await Promise.all([
     prisma.purchaseOrder.findMany({
       where: { id: { in: ids } },
       include: { manufacturer: true, items: true },
@@ -47,8 +51,13 @@ export async function GET(req: NextRequest) {
     prisma.outlet.findMany({ select: { id: true, marking: true, name: true } }),
   ]);
 
-  const outletMapById      = new Map(allOutlets.map(o => [o.id,      o]));
-  const outletMapByMarking = new Map(allOutlets.map(o => [o.marking, o]));
+  // Filter to only the outlets the user selected (if no filter, include all)
+  const allOutlets = selectedOutletIds
+    ? allOutletsRaw.filter(o => selectedOutletIds.has(o.id))
+    : allOutletsRaw;
+
+  const outletMapById      = new Map(allOutletsRaw.map(o => [o.id,      o]));
+  const outletMapByMarking = new Map(allOutletsRaw.map(o => [o.marking, o]));
 
   // Legacy reverse map: old outlet IDs baked into imported PO data → marking
   // Used when the DB was re-seeded and the stored outletId no longer matches current rows
