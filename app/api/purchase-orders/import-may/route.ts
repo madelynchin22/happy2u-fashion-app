@@ -4,19 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import * as XLSX from "xlsx";
 
-const OUTLET_MAP: Record<string, string> = {
-  "JN53-H2UWM":     "cmowg9eed0001nkbf2y1yx9d7",
-  "JN55-H2UES":     "cmowg9eee0002nkbfe9eiqekp",
-  "JN55-H2USA":     "cmowg9eef0003nkbfrwixoa72",
-  "JN59-H2UMV":     "cmowg9eef0004nkbfwbxvom6o",
-  "JN62-H2UPTJ":    "cmowg9eeg0005nkbflnslo9rr",
-  "JN75-H2UABM":    "cmowg9eeg0006nkbf86bo15ax",
-  "JN75-H2UABMDEP": "cmowg9eeh0007nkbfyai2gkfq",
-  "JN75-H2UAK":     "cmowg9eei0008nkbfkahlsmcb",
-  "JN75-H2UHQ":     "cmowg9eei0009nkbfhtoz6o1y",
-  "JN81-H2UATC":    "cmowg9eej000ankbfoo8xwf0z",
-  "JN81-H2UBI":     "cmowg9eej000bnkbf9yec4sdi",
-};
+// Outlet IDs looked up from DB at import time — no hardcoded IDs
 
 const PO_CONFIGS = [
   { poNumber: "PO-2026-MAY01", mfrName: "Nancy",          poSheet: "MAY-01 (NANCY)",       plSheet: "MAY-01 (PL)"   },
@@ -37,7 +25,11 @@ function excelDate(v: unknown): Date | null {
   return new Date(Math.round((v - 25569) * 86400000));
 }
 
-function parsePL(wb: XLSX.WorkBook, plSheet: string): Record<string, object[]> {
+function parsePL(
+  wb: XLSX.WorkBook,
+  plSheet: string,
+  outletByMarking: Map<string, string>,
+): Record<string, object[]> {
   const ws = wb.Sheets[plSheet];
   if (!ws) return {};
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][];
@@ -45,11 +37,11 @@ function parsePL(wb: XLSX.WorkBook, plSheet: string): Record<string, object[]> {
   let currentSku = "";
   for (let i = 16; i < rows.length; i++) {
     const r = rows[i] as unknown[];
-    const sku   = str(r[2]);
+    const sku     = str(r[2]);
     const marking = str(r[4]);
     if (sku) currentSku = sku;
     if (!currentSku || !marking || marking === "MARKING") continue;
-    const outletId = OUTLET_MAP[marking];
+    const outletId = outletByMarking.get(marking);
     if (!outletId) continue;
     const q = [r[5], r[6], r[7], r[8], r[9], r[10]].map(v => Number(v) || 0);
     const total = q.reduce((a, b) => a + b, 0);
@@ -165,13 +157,17 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 2. Create each PO from Excel ─────────────────────────────────────────
+    // Look up outlet IDs from the live DB so we never rely on hardcoded IDs
+    const dbOutlets = await prisma.outlet.findMany({ select: { id: true, marking: true } });
+    const outletByMarking = new Map(dbOutlets.map(o => [o.marking, o.id]));
+
     const adminUser = await prisma.user.findFirst({ select: { id: true } });
     const log: string[] = [];
 
     for (const cfg of PO_CONFIGS) {
       const mfrId = await getMfrId(cfg.mfrName);
       const { date, totalPairs, totalPrice, items } = parsePO(wb, cfg.poSheet);
-      const allocMap = parsePL(wb, cfg.plSheet);
+      const allocMap = parsePL(wb, cfg.plSheet, outletByMarking);
 
       if (!items.length) {
         log.push(`⚠ ${cfg.poNumber} (${cfg.mfrName}) — no items found, skipped`);
@@ -208,8 +204,8 @@ export async function POST(req: NextRequest) {
               totalPairs:    item.totalPairs,
               discountPrice: item.discountPrice,
               lineTotal:     item.lineTotal,
-              outletAllocations: allocMap[item.h2uSku]
-                ? JSON.stringify(allocMap[item.h2uSku])
+              outletAllocations: (allocMap[item.h2uSku] ?? allocMap[item.supplierSku])
+                ? JSON.stringify(allocMap[item.h2uSku] ?? allocMap[item.supplierSku])
                 : null,
             })),
           },

@@ -170,12 +170,18 @@ export function GroupPackingListPDF({
 
             (po.items ?? []).forEach((item: any) => {
               const allocs: any[] = item.outletAllocations ?? [];
-              const allocByOutletId = new Map<string, any>(allocs.map((a: any) => [a.outletId, a]));
+              const allocByOutletId      = new Map<string, any>(allocs.map((a: any) => [a.outletId, a]));
+              // Secondary map keyed by resolved outlet marking (handles legacy outlet IDs)
+              const allocByOutletMarking = new Map<string, any>(
+                allocs.map((a: any) => [a.outlet?.marking ?? a.outletId, a])
+              );
 
               const outletRows: { marking: string; alloc: any }[] = allOutlets
                 ? allOutlets.map(o => ({
                     marking: o.marking,
-                    alloc: allocByOutletId.get(o.id) ?? { outletId: o.id },
+                    alloc: allocByOutletId.get(o.id)
+                      ?? allocByOutletMarking.get(o.marking)
+                      ?? { outletId: o.id },
                   }))
                 : allocs
                     .filter((a: any) => SIZES.reduce((s, sz) => s + ((a as any)[`qty${sz}`] || 0), 0) > 0)

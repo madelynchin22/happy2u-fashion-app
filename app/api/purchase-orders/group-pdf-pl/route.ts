@@ -47,7 +47,32 @@ export async function GET(req: NextRequest) {
     prisma.outlet.findMany({ select: { id: true, marking: true, name: true } }),
   ]);
 
-  const outletMap = new Map(allOutlets.map(o => [o.id, o]));
+  const outletMapById      = new Map(allOutlets.map(o => [o.id,      o]));
+  const outletMapByMarking = new Map(allOutlets.map(o => [o.marking, o]));
+
+  // Legacy reverse map: old outlet IDs baked into imported PO data → marking
+  // Used when the DB was re-seeded and the stored outletId no longer matches current rows
+  const LEGACY_ID_TO_MARKING: Record<string, string> = {
+    "cmowg9eed0001nkbf2y1yx9d7": "JN53-H2UWM",
+    "cmowg9eee0002nkbfe9eiqekp": "JN55-H2UES",
+    "cmowg9eef0003nkbfrwixoa72": "JN55-H2USA",
+    "cmowg9eef0004nkbfwbxvom6o": "JN59-H2UMV",
+    "cmowg9eeg0005nkbflnslo9rr": "JN62-H2UPTJ",
+    "cmowg9eeg0006nkbf86bo15ax": "JN75-H2UABM",
+    "cmowg9eeh0007nkbfyai2gkfq": "JN75-H2UABMDEP",
+    "cmowg9eei0008nkbfkahlsmcb": "JN75-H2UAK",
+    "cmowg9eei0009nkbfhtoz6o1y": "JN75-H2UHQ",
+    "cmowg9eej000ankbfoo8xwf0z": "JN81-H2UATC",
+    "cmowg9eej000bnkbf9yec4sdi": "JN81-H2UBI",
+  };
+
+  function resolveOutlet(outletId: string) {
+    return outletMapById.get(outletId)
+      ?? (LEGACY_ID_TO_MARKING[outletId]
+          ? outletMapByMarking.get(LEGACY_ID_TO_MARKING[outletId]) ?? null
+          : null)
+      ?? { id: outletId, marking: LEGACY_ID_TO_MARKING[outletId] ?? outletId, name: "" };
+  }
 
   // Sort allOutlets by the order they appear in the first item's outletAllocations
   // (which was imported from Excel, preserving the Excel display order)
@@ -55,8 +80,17 @@ export async function GET(req: NextRequest) {
   if (firstAllocsRaw) {
     try {
       const firstAllocs: { outletId: string }[] = JSON.parse(firstAllocsRaw);
-      const orderMap = new Map(firstAllocs.map((a, i) => [a.outletId, i]));
-      allOutlets.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+      // Build order map keyed by both current ID and resolved marking
+      const orderMap = new Map<string, number>();
+      firstAllocs.forEach((a, i) => {
+        orderMap.set(a.outletId, i);
+        const resolved = resolveOutlet(a.outletId);
+        if (resolved && "marking" in resolved) orderMap.set((resolved as any).marking, i);
+      });
+      allOutlets.sort((a, b) =>
+        (orderMap.get(a.id) ?? orderMap.get(a.marking) ?? 999) -
+        (orderMap.get(b.id) ?? orderMap.get(b.marking) ?? 999)
+      );
     } catch {}
   }
 
@@ -133,9 +167,9 @@ export async function GET(req: NextRequest) {
         let outletAllocations: any[] = [];
         if (item.outletAllocations) {
           try {
-            outletAllocations = (JSON.parse(item.outletAllocations) as any[]).map(a => ({
+            outletAllocations = (JSON.parse(item.outletAllocations) as any[]).map((a: any) => ({
               ...a,
-              outlet: outletMap.get(a.outletId) ?? { marking: a.outletId, name: a.outletId },
+              outlet: resolveOutlet(a.outletId),
             }));
           } catch {}
         }
