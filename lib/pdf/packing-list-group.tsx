@@ -90,6 +90,10 @@ export function GroupPackingListPDF({
     : Object.entries(outletTotals).sort((a, b) => a[0].localeCompare(b[0]));
   const grandTotal = outletEntries.reduce((s, [,v]) => s + v, 0);
 
+  // Sets used to filter grand-total per-size to only the selected/visible outlets
+  const selectedOutletIds      = new Set((allOutlets ?? []).map(o => o.id));
+  const selectedOutletMarkings = new Set((allOutlets ?? []).map(o => o.marking));
+
   const firstDate = pos[0]?.date ?? pos[0]?.createdAt ?? new Date().toISOString();
   const isMulti = pos.length > 1;
 
@@ -235,10 +239,10 @@ export function GroupPackingListPDF({
                       );
                     })}
 
-                    {/* Sub-total row */}
+                    {/* Sub-total row — sums only the visible outlet rows */}
                     {(() => {
                       const colourTotal = SIZES.reduce((s, sz) =>
-                        s + allocs.reduce((as: number, a: any) => as + ((a as any)[`qty${sz}`] || 0), 0), 0);
+                        s + outletRows.reduce((as, { alloc }) => as + ((alloc as any)[`qty${sz}`] || 0), 0), 0);
                       return (
                         <View key={`${item.id}-sub`} style={S.totalRow}>
                           <Text style={[S.td, { width: W.supSku }]}></Text>
@@ -246,7 +250,7 @@ export function GroupPackingListPDF({
                           <Text style={[S.td, { width: W.color }]}></Text>
                           <Text style={[S.td, { width: W.marking }]}></Text>
                           {SIZES.map(s => {
-                            const t = allocs.reduce((sum: number, a: any) => sum + ((a as any)[`qty${s}`] || 0), 0);
+                            const t = outletRows.reduce((sum, { alloc }) => sum + ((alloc as any)[`qty${s}`] || 0), 0);
                             return <Text key={s} style={[S.td, S.tdBold, S.tdCenter, { width: W.size }]}>{t}</Text>;
                           })}
                           <Text style={[S.td, S.tdBold, S.tdCenter, { width: W.pair }]}>{colourTotal}</Text>
@@ -271,8 +275,12 @@ export function GroupPackingListPDF({
             {SIZES.map(s => {
               const st = pos.reduce((sum, po) =>
                 sum + (po.items ?? []).reduce((is: number, item: any) =>
-                  is + (item.outletAllocations ?? []).reduce((as: number, a: any) =>
-                    as + ((a as any)[`qty${s}`] || 0), 0), 0), 0);
+                  is + (item.outletAllocations ?? [])
+                    .filter((a: any) =>
+                      !allOutlets ||
+                      selectedOutletIds.has(a.outletId) ||
+                      selectedOutletMarkings.has(a.outlet?.marking))
+                    .reduce((as: number, a: any) => as + ((a as any)[`qty${s}`] || 0), 0), 0), 0);
               return <Text key={s} style={[S.td, S.tdBold, S.tdCenter, { width: W.size }]}>{st || ""}</Text>;
             })}
             <Text style={[S.td, S.tdBold, S.tdCenter, { width: W.pair }]}>{grandTotal}</Text>
