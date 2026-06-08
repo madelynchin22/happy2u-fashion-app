@@ -135,7 +135,8 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
         ? await toDataUri(libEntry.shoePhotoUrl)
         : null;
       const mainSku   = (colorKey ? mainSkuMap.get(colorKey)   : null) ?? item.mainSku   ?? libEntry?.mainSku   ?? null;
-      const colorCode = (colorKey ? colorCodeMap.get(colorKey) : null) ?? item.colorCode ?? libEntry?.colorCode ?? null;
+      const storedCode = item.colorCode && !/[一-鿿]/.test(item.colorCode) ? item.colorCode : null;
+      const colorCode = (colorKey ? colorCodeMap.get(colorKey) : null) ?? storedCode ?? libEntry?.colorCode ?? null;
       const brand     = item.brand ?? (item.h2uSku ? h2uToBrand.get(item.h2uSku) : null) ?? libEntry?.brand ?? null;
       const assets    = brand ? vendorUriMap.get(brand) : null;
       return {
