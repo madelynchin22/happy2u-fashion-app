@@ -478,7 +478,6 @@ function Timeline({ po, onSave, onItemShipSave }: {
                         )}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
-                            {item.colorCode && <span className="text-[9px] font-mono font-bold text-brand-600 bg-brand-50 border border-brand-200 px-1 rounded">{item.colorCode}</span>}
                             <p className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</p>
                           </div>
                           <p className="text-[10px] text-gray-400">{item.totalPairs} pairs</p>
@@ -1120,11 +1119,6 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
                               )}
                               <div>
                                 <div className="flex items-center gap-1.5">
-                                  {item.colorCode && (
-                                    <span className="text-[10px] font-mono font-bold text-brand-700 bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded">
-                                      {item.colorCode}
-                                    </span>
-                                  )}
                                   <span className="text-sm text-gray-800">{item.colorName || "—"}</span>
                                 </div>
                                 {item.h2uSku && (
