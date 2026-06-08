@@ -259,6 +259,7 @@ export default function SettingsPage() {
                   <select className="input" value={outletForm.country} onChange={e=>setOutletForm(f=>({...f,country:e.target.value}))}>
                     <option value="MY">Malaysia</option>
                     <option value="TH">Thailand</option>
+                    <option value="CN">China</option>
                   </select>
                 </div>
                 <div className="flex items-end pb-0.5">
@@ -303,6 +304,7 @@ export default function SettingsPage() {
                   <select className="input" value={editForm.country} onChange={e => setEditForm(f => ({...f, country: e.target.value}))}>
                     <option value="MY">Malaysia</option>
                     <option value="TH">Thailand</option>
+                    <option value="CN">China</option>
                   </select>
                 </div>
                 <div className="flex items-end pb-0.5">
