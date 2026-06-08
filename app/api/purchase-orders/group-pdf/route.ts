@@ -148,7 +148,9 @@ export async function GET(req: NextRequest) {
         const skuMap    = p.sampleOrderId ? mainSkuMap.get(p.sampleOrderId)   : null;
         const codeMap   = p.sampleOrderId ? colorCodeMap.get(p.sampleOrderId) : null;
         const mainSku   = (colorKey ? skuMap?.get(colorKey)  : null) ?? item.mainSku   ?? item.h2uSku ?? null;
-        const colorCode = (colorKey ? codeMap?.get(colorKey) : null) ?? item.colorCode ?? h2uCodeMap.get(item.h2uSku ?? "") ?? null;
+        // Treat "按版" and any Chinese-character codes as "not set" so we fall through to the library
+        const storedCode = item.colorCode && !/[一-鿿]/.test(item.colorCode) ? item.colorCode : null;
+        const colorCode = (colorKey ? codeMap?.get(colorKey) : null) ?? storedCode ?? h2uCodeMap.get(item.h2uSku ?? "") ?? null;
         const brand     = item.brand ?? (item.h2uSku ? h2uBrandMap.get(item.h2uSku) : null) ?? null;
         const assets    = brand ? vendorUriMap.get(brand) : null;
         return {

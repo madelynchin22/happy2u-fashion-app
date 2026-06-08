@@ -149,10 +149,11 @@ export async function GET(req: NextRequest) {
   const libByH2u = allH2uSkus.length
     ? await prisma.productLibrary.findMany({
         where: { h2uSku: { in: allH2uSkus } },
-        select: { h2uSku: true, shoePhotoUrl: true },
+        select: { h2uSku: true, shoePhotoUrl: true, colorCode: true },
       })
     : [];
   const h2uPhotoMap = new Map(libByH2u.map(l => [l.h2uSku, l.shoePhotoUrl]));
+  const h2uCodeMap  = new Map(libByH2u.map(l => [l.h2uSku, l.colorCode]));
 
   // Second-level fallback: PO stores truncated SKU (e.g. S1701P) but ProductLibrary has S1701PK.
   // Try startsWith(itemSku) first for the correct colour, then 4-digit prefix as last resort.
@@ -191,7 +192,8 @@ export async function GET(req: NextRequest) {
         const skuMap    = p.sampleOrderId ? mainSkuMap.get(p.sampleOrderId)   : null;
         const codeMap   = p.sampleOrderId ? colorCodeMap.get(p.sampleOrderId) : null;
         const mainSku   = (colorKey ? skuMap?.get(colorKey)  : null) ?? item.mainSku   ?? null;
-        const colorCode = (colorKey ? codeMap?.get(colorKey) : null) ?? item.colorCode ?? null;
+        const storedCode = item.colorCode && !/[一-鿿]/.test(item.colorCode) ? item.colorCode : null;
+        const colorCode = (colorKey ? codeMap?.get(colorKey) : null) ?? storedCode ?? h2uCodeMap.get(item.h2uSku ?? "") ?? null;
 
         let outletAllocations: any[] = [];
         if (item.outletAllocations) {
