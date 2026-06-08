@@ -37,21 +37,28 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     : [];
   const h2uPhotoMap = new Map(libPhotos.map(l => [l.h2uSku, l.shoePhotoUrl]));
 
-  // Fallback: for variants still missing a photo, search siblings by h2uSku prefix (e.g. S1701)
-  // mainSku may be null in older records, so we match on h2uSku startsWith instead
+  // Fallback: PO may store a truncated SKU (e.g. S1701P) while ProductLibrary has S1701PK.
+  // For each still-missing SKU, try startsWith(itemSku) to find the matching color variant,
+  // then fall back to startsWith(4-digit prefix) only as a last resort.
   const stillMissing = h2uSkusNeedingPhoto.filter(sku => !h2uPhotoMap.get(sku));
-  if (stillMissing.length > 0) {
-    const prefixes = [...new Set(stillMissing.map(sku => sku.match(MAIN_SKU_RE_PHOTO)?.[1]).filter(Boolean))] as string[];
-    for (const prefix of prefixes) {
-      const sibling = await prisma.productLibrary.findFirst({
-        where: { h2uSku: { startsWith: prefix }, shoePhotoUrl: { not: null } },
-        select: { h2uSku: true, shoePhotoUrl: true },
+  for (const sku of stillMissing) {
+    // Try: find a ProductLibrary entry whose h2uSku starts with this item's SKU (e.g. S1701P → S1701PK)
+    const colorMatch = await prisma.productLibrary.findFirst({
+      where: { h2uSku: { startsWith: sku }, shoePhotoUrl: { not: null } },
+      select: { shoePhotoUrl: true },
+    });
+    if (colorMatch?.shoePhotoUrl) {
+      h2uPhotoMap.set(sku, colorMatch.shoePhotoUrl);
+      continue;
+    }
+    // Last resort: any variant from the same style family (S####)
+    const stylePrefix = sku.match(MAIN_SKU_RE_PHOTO)?.[1];
+    if (stylePrefix) {
+      const styleMatch = await prisma.productLibrary.findFirst({
+        where: { h2uSku: { startsWith: stylePrefix }, shoePhotoUrl: { not: null } },
+        select: { shoePhotoUrl: true },
       });
-      if (sibling?.shoePhotoUrl) {
-        for (const sku of stillMissing) {
-          if (sku.startsWith(prefix)) h2uPhotoMap.set(sku, sibling.shoePhotoUrl);
-        }
-      }
+      if (styleMatch?.shoePhotoUrl) h2uPhotoMap.set(sku, styleMatch.shoePhotoUrl);
     }
   }
 

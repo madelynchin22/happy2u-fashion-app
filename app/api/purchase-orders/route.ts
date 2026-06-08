@@ -56,21 +56,25 @@ export async function GET() {
     : [];
   const h2uPhotoMap = new Map(libByH2u.map(l => [l.h2uSku, l.shoePhotoUrl]));
 
-  // Second-level fallback: for SKUs with no photo, search any sibling by h2uSku prefix
-  // mainSku may be null in older records, so we match on h2uSku startsWith instead
+  // Second-level fallback: PO may store a truncated SKU (e.g. S1701P) while ProductLibrary has S1701PK.
+  // Try startsWith(itemSku) first to find the matching color variant, then style prefix as last resort.
   const skusMissingPhoto = allH2uSkus.filter(sku => !h2uPhotoMap.get(sku));
-  if (skusMissingPhoto.length > 0) {
-    const prefixes = [...new Set(skusMissingPhoto.map(sku => sku.match(MAIN_SKU_RE)?.[1]).filter(Boolean))] as string[];
-    for (const prefix of prefixes) {
-      const sibling = await prisma.productLibrary.findFirst({
-        where: { h2uSku: { startsWith: prefix }, shoePhotoUrl: { not: null } },
-        select: { h2uSku: true, shoePhotoUrl: true },
+  for (const sku of skusMissingPhoto) {
+    const colorMatch = await prisma.productLibrary.findFirst({
+      where: { h2uSku: { startsWith: sku }, shoePhotoUrl: { not: null } },
+      select: { shoePhotoUrl: true },
+    });
+    if (colorMatch?.shoePhotoUrl) {
+      h2uPhotoMap.set(sku, colorMatch.shoePhotoUrl);
+      continue;
+    }
+    const stylePrefix = sku.match(MAIN_SKU_RE)?.[1];
+    if (stylePrefix) {
+      const styleMatch = await prisma.productLibrary.findFirst({
+        where: { h2uSku: { startsWith: stylePrefix }, shoePhotoUrl: { not: null } },
+        select: { shoePhotoUrl: true },
       });
-      if (sibling?.shoePhotoUrl) {
-        for (const sku of skusMissingPhoto) {
-          if (sku.startsWith(prefix)) h2uPhotoMap.set(sku, sibling.shoePhotoUrl);
-        }
-      }
+      if (styleMatch?.shoePhotoUrl) h2uPhotoMap.set(sku, styleMatch.shoePhotoUrl);
     }
   }
 
