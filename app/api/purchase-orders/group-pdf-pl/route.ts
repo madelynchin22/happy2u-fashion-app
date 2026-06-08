@@ -135,6 +135,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Fallback: h2uSku → photo from ProductLibrary (for POs without sampleOrderId)
+  const MAIN_SKU_RE = /^(S\d{4})/i;
   const allH2uSkus = pos.flatMap(p => (p.items ?? []).map((i: any) => i.h2uSku).filter(Boolean));
   const libByH2u = allH2uSkus.length
     ? await prisma.productLibrary.findMany({
@@ -143,6 +144,25 @@ export async function GET(req: NextRequest) {
       })
     : [];
   const h2uPhotoMap = new Map(libByH2u.map(l => [l.h2uSku, l.shoePhotoUrl]));
+
+  // Second-level fallback: PO stores truncated SKU (e.g. S1701P) but ProductLibrary has S1701PK.
+  // Try startsWith(itemSku) first for the correct colour, then 4-digit prefix as last resort.
+  const skusMissingPhoto = allH2uSkus.filter(sku => !h2uPhotoMap.get(sku));
+  for (const sku of skusMissingPhoto) {
+    const colorMatch = await prisma.productLibrary.findFirst({
+      where: { h2uSku: { startsWith: sku }, shoePhotoUrl: { not: null } },
+      select: { shoePhotoUrl: true },
+    });
+    if (colorMatch?.shoePhotoUrl) { h2uPhotoMap.set(sku, colorMatch.shoePhotoUrl); continue; }
+    const stylePrefix = sku.match(MAIN_SKU_RE)?.[1];
+    if (stylePrefix) {
+      const styleMatch = await prisma.productLibrary.findFirst({
+        where: { h2uSku: { startsWith: stylePrefix }, shoePhotoUrl: { not: null } },
+        select: { shoePhotoUrl: true },
+      });
+      if (styleMatch?.shoePhotoUrl) h2uPhotoMap.set(sku, styleMatch.shoePhotoUrl);
+    }
+  }
 
   const posEnriched = await Promise.all(pos.map(async p => {
     const sr = p.sampleOrderId ? sampleMap.get(p.sampleOrderId) : null;
