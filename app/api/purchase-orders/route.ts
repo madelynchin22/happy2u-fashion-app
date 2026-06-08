@@ -46,6 +46,7 @@ export async function GET() {
   const libProductMap = new Map(samples.map(s => [s.orderNumber, libNameByUuid.get(s.id) ?? null]));
 
   // Fallback: look up shoe photos from ProductLibrary by h2uSku for items without photoUrl
+  const MAIN_SKU_RE = /^(S\d{4})/i;
   const allH2uSkus = pos.flatMap(p => (p.items ?? []).map(i => i.h2uSku).filter(Boolean)) as string[];
   const libByH2u = allH2uSkus.length
     ? await prisma.productLibrary.findMany({
@@ -55,7 +56,23 @@ export async function GET() {
     : [];
   const h2uPhotoMap = new Map(libByH2u.map(l => [l.h2uSku, l.shoePhotoUrl]));
 
-  const MAIN_SKU_RE = /^(S\d{4})/i;
+  // Second-level fallback: for SKUs with no photo, search any sibling by h2uSku prefix
+  // mainSku may be null in older records, so we match on h2uSku startsWith instead
+  const skusMissingPhoto = allH2uSkus.filter(sku => !h2uPhotoMap.get(sku));
+  if (skusMissingPhoto.length > 0) {
+    const prefixes = [...new Set(skusMissingPhoto.map(sku => sku.match(MAIN_SKU_RE)?.[1]).filter(Boolean))] as string[];
+    for (const prefix of prefixes) {
+      const sibling = await prisma.productLibrary.findFirst({
+        where: { h2uSku: { startsWith: prefix }, shoePhotoUrl: { not: null } },
+        select: { h2uSku: true, shoePhotoUrl: true },
+      });
+      if (sibling?.shoePhotoUrl) {
+        for (const sku of skusMissingPhoto) {
+          if (sku.startsWith(prefix)) h2uPhotoMap.set(sku, sibling.shoePhotoUrl);
+        }
+      }
+    }
+  }
 
   const result = pos.map(p => {
     // Deduplicate items by main SKU prefix (S####), pick first photo per unique model

@@ -25,6 +25,7 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
   if (!po) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Fill missing item photos from ProductLibrary by h2uSku
+  const MAIN_SKU_RE_PHOTO = /^(S\d{4})/i;
   const h2uSkusNeedingPhoto = (po.items ?? [])
     .filter((i: any) => !i.photoUrl && i.h2uSku)
     .map((i: any) => i.h2uSku as string);
@@ -35,6 +36,25 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
       })
     : [];
   const h2uPhotoMap = new Map(libPhotos.map(l => [l.h2uSku, l.shoePhotoUrl]));
+
+  // Fallback: for variants still missing a photo, search siblings by h2uSku prefix (e.g. S1701)
+  // mainSku may be null in older records, so we match on h2uSku startsWith instead
+  const stillMissing = h2uSkusNeedingPhoto.filter(sku => !h2uPhotoMap.get(sku));
+  if (stillMissing.length > 0) {
+    const prefixes = [...new Set(stillMissing.map(sku => sku.match(MAIN_SKU_RE_PHOTO)?.[1]).filter(Boolean))] as string[];
+    for (const prefix of prefixes) {
+      const sibling = await prisma.productLibrary.findFirst({
+        where: { h2uSku: { startsWith: prefix }, shoePhotoUrl: { not: null } },
+        select: { h2uSku: true, shoePhotoUrl: true },
+      });
+      if (sibling?.shoePhotoUrl) {
+        for (const sku of stillMissing) {
+          if (sku.startsWith(prefix)) h2uPhotoMap.set(sku, sibling.shoePhotoUrl);
+        }
+      }
+    }
+  }
+
   const enrichedItems = (po.items ?? []).map((item: any) => ({
     ...item,
     photoUrl: item.photoUrl ?? (item.h2uSku ? h2uPhotoMap.get(item.h2uSku) ?? null : null),
