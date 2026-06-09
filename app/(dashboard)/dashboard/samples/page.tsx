@@ -51,6 +51,7 @@ const SAVE_FOR_LATER_STATUSES = ["save_for_later"];
 const SAMPLE_PRESET_COLORS = [
   { name: "Black",    hex: "#1a1a1a" },
   { name: "Beige",    hex: "#D4B896" },
+  { name: "Brown",    hex: "#7B4F2E" },
   { name: "Espresso", hex: "#3C1414" },
   { name: "White",    hex: "#F4F4F4" },
 ];
