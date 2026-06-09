@@ -17,41 +17,49 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const data = await req.json();
 
-  // Auto-promote to "active" when a Main SKU is assigned and status is still "draft"
-  if (data.mainSku && !data.status) {
-    const current = await prisma.productLibrary.findUnique({
-      where: { id: (await params).id },
-      select: { status: true },
-    });
-    if (current?.status === "draft") {
-      data.status = "active";
-    }
-  }
+  try {
+    const data = await req.json();
+    const id = (await params).id;
 
-  const item = await prisma.productLibrary.update({
-    where: { id: (await params).id }, data,
-    include: { manufacturer: { select: { id: true, name: true } } },
-  });
-
-  // When a Main SKU is assigned, propagate it to any linked Purchase Orders.
-  // POs store the sample order NUMBER string (e.g. "SR-2026-002"), not the UUID,
-  // so we look up the orderNumber first then match.
-  if (data.mainSku && item.sampleOrderId) {
-    const sr = await prisma.sampleOrder.findUnique({
-      where: { id: item.sampleOrderId },
-      select: { orderNumber: true },
-    });
-    if (sr) {
-      await prisma.purchaseOrder.updateMany({
-        where: { sampleOrderId: sr.orderNumber },
-        data:  { productName: data.mainSku },
+    // Auto-promote to "active" when a Main SKU is assigned and status is still "draft"
+    if (data.mainSku && !data.status) {
+      const current = await prisma.productLibrary.findUnique({
+        where: { id },
+        select: { status: true },
       });
+      if (current?.status === "draft") {
+        data.status = "active";
+      }
     }
-  }
 
-  return NextResponse.json(item);
+    const item = await prisma.productLibrary.update({
+      where: { id }, data,
+      include: { manufacturer: { select: { id: true, name: true } } },
+    });
+
+    // When a Main SKU is assigned, propagate it to any linked Purchase Orders.
+    // POs store the sample order NUMBER string (e.g. "SR-2026-002"), not the UUID,
+    // so we look up the orderNumber first then match.
+    if (data.mainSku && item.sampleOrderId) {
+      const sr = await prisma.sampleOrder.findUnique({
+        where: { id: item.sampleOrderId },
+        select: { orderNumber: true },
+      });
+      if (sr) {
+        await prisma.purchaseOrder.updateMany({
+          where: { sampleOrderId: sr.orderNumber },
+          data:  { productName: data.mainSku },
+        });
+      }
+    }
+
+    return NextResponse.json(item);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[PATCH /api/product-library/[id]]", message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {

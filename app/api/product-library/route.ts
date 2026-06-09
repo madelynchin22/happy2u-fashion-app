@@ -26,13 +26,19 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const data = await req.json();
-  const count = await prisma.productLibrary.count();
-  const libNumber = generateOrderNumber("PL", count + 1);
+  try {
+    const data = await req.json();
+    const count = await prisma.productLibrary.count();
+    const libNumber = generateOrderNumber("PL", count + 1);
 
-  const item = await prisma.productLibrary.create({
-    data: { ...data, libNumber },
-    include: { manufacturer: { select: { id: true, name: true } } },
-  });
-  return NextResponse.json(item, { status: 201 });
+    const item = await prisma.productLibrary.create({
+      data: { ...data, libNumber },
+      include: { manufacturer: { select: { id: true, name: true } } },
+    });
+    return NextResponse.json(item, { status: 201 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[POST /api/product-library]", message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

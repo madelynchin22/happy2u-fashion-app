@@ -447,14 +447,15 @@ export default function ProductLibraryPage() {
         const updated = await res.json();
         setAllItems(prev => prev.map(it => it.id === editId ? { ...it, ...updated } : it));
       } else {
-        alert("Save failed. Please try again.");
+        const body = await res.json().catch(() => ({}));
+        alert(`Save failed: ${body.error ?? res.status}`);
         setSaving(false);
         return;
       }
     } else {
       const res = await fetch("/api/product-library", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
       if (res.ok) { const d = await res.json(); setAllItems(prev => [d, ...prev]); }
-      else { alert("Save failed. Please try again."); setSaving(false); return; }
+      else { const body = await res.json().catch(() => ({})); alert(`Save failed: ${body.error ?? res.status}`); setSaving(false); return; }
     }
     setSaving(false);
     setModal(false);
