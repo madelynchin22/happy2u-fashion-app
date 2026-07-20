@@ -336,7 +336,7 @@ export default function WarehouseReceivingPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <Warehouse size={20} className="text-brand-600" />
-            Warehouse Receiving
+            China Warehouse Receiving
           </h1>
           <p className="text-sm text-gray-500 mt-1">
             QC incoming supplier batches at the CN warehouse — record quantities per size, resolve defects, and add good stock to inventory

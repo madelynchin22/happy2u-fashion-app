@@ -8,7 +8,7 @@ const TABS = [
   { href: "/dashboard/purchase-orders/payment-tracking",   label: "Payment Tracking",   icon: CreditCard    },
   { href: "/dashboard/purchase-orders/defect-list",        label: "Defect List",        icon: AlertTriangle },
   { href: "/dashboard/purchase-orders/outlet-receipt",     label: "Outlet Receipt",     icon: Store         },
-  { href: "/dashboard/purchase-orders/warehouse-receiving", label: "Warehouse Receiving", icon: Warehouse    },
+  { href: "/dashboard/purchase-orders/warehouse-receiving", label: "China Warehouse Receiving", icon: Warehouse },
 ];
 
 export function POTabs() {

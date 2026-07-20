@@ -29,7 +29,7 @@ const nav: NavItem[] = [
       { href: "/dashboard/purchase-orders/payment-tracking",    label: "Payment Tracking" },
       { href: "/dashboard/purchase-orders/defect-list",         label: "Defect List" },
       { href: "/dashboard/purchase-orders/outlet-receipt",      label: "Outlet Receipt Submit" },
-      { href: "/dashboard/purchase-orders/warehouse-receiving", label: "Warehouse Receiving" },
+      { href: "/dashboard/purchase-orders/warehouse-receiving", label: "China Warehouse Receiving" },
     ],
   },
   { href: "/dashboard/shipments",  label: "Shipments",       icon: Container },
