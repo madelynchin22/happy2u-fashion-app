@@ -26,9 +26,10 @@ const nav: NavItem[] = [
     label: "Purchase Orders",
     icon: ShoppingCart,
     children: [
-      { href: "/dashboard/purchase-orders/payment-tracking", label: "Payment Tracking" },
-      { href: "/dashboard/purchase-orders/defect-list",      label: "Defect List" },
-      { href: "/dashboard/purchase-orders/outlet-receipt",   label: "Outlet Receipt Submit" },
+      { href: "/dashboard/purchase-orders/payment-tracking",    label: "Payment Tracking" },
+      { href: "/dashboard/purchase-orders/defect-list",         label: "Defect List" },
+      { href: "/dashboard/purchase-orders/outlet-receipt",      label: "Outlet Receipt Submit" },
+      { href: "/dashboard/purchase-orders/warehouse-receiving", label: "Warehouse Receiving" },
     ],
   },
   { href: "/dashboard/shipments",  label: "Shipments",       icon: Container },
@@ -42,9 +43,10 @@ const nav: NavItem[] = [
 ];
 
 const CHILD_ICONS: Record<string, any> = {
-  "/dashboard/purchase-orders/payment-tracking": CreditCard,
-  "/dashboard/purchase-orders/defect-list":      AlertTriangle,
-  "/dashboard/purchase-orders/outlet-receipt":   Store,
+  "/dashboard/purchase-orders/payment-tracking":    CreditCard,
+  "/dashboard/purchase-orders/defect-list":         AlertTriangle,
+  "/dashboard/purchase-orders/outlet-receipt":      Store,
+  "/dashboard/purchase-orders/warehouse-receiving": Warehouse,
 };
 
 export function Sidebar() {

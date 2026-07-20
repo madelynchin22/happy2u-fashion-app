@@ -38,7 +38,8 @@ export async function GET() {
     }
     return {
       ...po,
-      outletDeliveries: po.outletDeliveries.filter(d => shippedOutletIds.has(d.outletId)),
+      // Warehouse deliveries (CN-H2UCNWH) have their own dedicated Warehouse Receiving page
+      outletDeliveries: po.outletDeliveries.filter(d => shippedOutletIds.has(d.outletId) && !d.outlet.isWarehouse),
     };
   }).filter(po => po.outletDeliveries.length > 0); // hide POs with no relevant outlets
 

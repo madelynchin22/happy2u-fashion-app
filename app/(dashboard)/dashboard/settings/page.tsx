@@ -7,7 +7,7 @@ import { Save, Plus, Trash2, Edit2, X, Upload, Trash } from "lucide-react";
 const DEFAULT_VENDORS = ["Belle", "BlissFit", "Bunny", "Fashion Bag", "Happy2U", "La Dolce Vita", "Latex", "Mary Jane"];
 type VendorAsset = { id: string; vendor: string; assetType: string; imageUrl: string };
 
-type Outlet = { id: string; name: string; marking: string; country: string; address?: string; isHQ: boolean };
+type Outlet = { id: string; name: string; marking: string; country: string; address?: string; isHQ: boolean; isWarehouse: boolean };
 type User   = { id: string; name?: string; email: string; role: string; outletId?: string };
 type Rate   = { id: string; fromCcy: string; toCcy: string; rate: number; setAt: string };
 
@@ -28,9 +28,9 @@ export default function SettingsPage() {
   const [vendorNames, setVendorNames]   = useState<string[]>(DEFAULT_VENDORS);
 
   const [outletModal, setOutletModal] = useState(false);
-  const [outletForm, setOutletForm]   = useState({ name:"", marking:"", country:"MY", address:"", isHQ:false });
+  const [outletForm, setOutletForm]   = useState({ name:"", marking:"", country:"MY", address:"", isHQ:false, isWarehouse:false });
   const [editOutlet, setEditOutlet]   = useState<Outlet | null>(null);
-  const [editForm, setEditForm]       = useState({ name:"", marking:"", country:"MY", address:"", isHQ:false });
+  const [editForm, setEditForm]       = useState({ name:"", marking:"", country:"MY", address:"", isHQ:false, isWarehouse:false });
   const [userModal, setUserModal]     = useState(false);
   const [userForm, setUserForm]       = useState({ name:"", email:"", password:"", role:"buyer", outletId:"" });
 
@@ -117,7 +117,7 @@ export default function SettingsPage() {
 
   function openEditOutlet(o: Outlet) {
     setEditOutlet(o);
-    setEditForm({ name: o.name, marking: o.marking, country: o.country, address: o.address ?? "", isHQ: o.isHQ });
+    setEditForm({ name: o.name, marking: o.marking, country: o.country, address: o.address ?? "", isHQ: o.isHQ, isWarehouse: o.isWarehouse });
   }
 
   async function updateOutlet() {
@@ -189,6 +189,7 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-gray-900 text-sm">{o.name}</span>
                   {o.isHQ && <span className="text-xs bg-brand-100 text-brand-700 px-1.5 py-0.5 rounded">HQ</span>}
+                  {o.isWarehouse && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Warehouse</span>}
                   <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">{o.country}</span>
                 </div>
                 <p className="text-xs text-gray-400 mt-0.5">Marking: <span className="font-mono">{o.marking}</span></p>
@@ -269,6 +270,12 @@ export default function SettingsPage() {
                   </label>
                 </div>
               </div>
+              <div>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={outletForm.isWarehouse} onChange={e=>setOutletForm(f=>({...f,isWarehouse:e.target.checked}))} />
+                  This is a Warehouse (supplier QC staging, e.g. CN-H2UCNWH)
+                </label>
+              </div>
               <div><label className="label">Address</label><input className="input" value={outletForm.address} onChange={e=>setOutletForm(f=>({...f,address:e.target.value}))} /></div>
             </div>
             <div className="flex gap-3 mt-5">
@@ -313,6 +320,12 @@ export default function SettingsPage() {
                     This is HQ
                   </label>
                 </div>
+              </div>
+              <div>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={editForm.isWarehouse} onChange={e => setEditForm(f => ({...f, isWarehouse: e.target.checked}))} />
+                  This is a Warehouse (supplier QC staging, e.g. CN-H2UCNWH)
+                </label>
               </div>
               <div>
                 <label className="label">Address</label>

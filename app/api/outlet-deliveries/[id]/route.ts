@@ -3,6 +3,26 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
+const SIZES = [35, 36, 37, 38, 39, 40, 41, 42];
+
+// Extracts per-size received/defect qty fields from a receiptItem payload, and sums them
+// into the aggregate receivedQty/defectQty columns (kept in sync so the Defect List's
+// `defectQty > 0` filter keeps working for warehouse rows too).
+function sizeLevelFields(ri: any) {
+  const out: Record<string, any> = {};
+  let receivedSum = 0, hasReceived = false;
+  let defectSum   = 0, hasDefect   = false;
+  for (const sz of SIZES) {
+    const rKey = `receivedQty${sz}`;
+    const dKey = `defectQty${sz}`;
+    if (ri[rKey] != null) { out[rKey] = Number(ri[rKey]); receivedSum += out[rKey]; hasReceived = true; }
+    if (ri[dKey] != null) { out[dKey] = Number(ri[dKey]); defectSum   += out[dKey]; hasDefect   = true; }
+  }
+  if (hasReceived) out.receivedQty = receivedSum;
+  if (hasDefect)   out.defectQty   = defectSum;
+  return out;
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,6 +42,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if ("receiptItems" in raw && Array.isArray(raw.receiptItems)) {
     const now = new Date();
     for (const ri of raw.receiptItems) {
+      const sizeFields = sizeLevelFields(ri);
+      const resolutionFields: Record<string, any> = {};
+      if ("defectResolution" in ri) {
+        resolutionFields.defectResolution      = ri.defectResolution || null;
+        resolutionFields.defectResolutionNotes = ri.defectResolutionNotes || null;
+        resolutionFields.defectResolvedAt      = ri.defectResolution ? now : null;
+      }
       if (ri.id) {
         await prisma.outletReceiptItem.update({
           where: { id: ri.id },
@@ -30,6 +57,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             defectQty:   ri.defectQty   != null ? Number(ri.defectQty)   : undefined,
             notes:       ri.notes       ?? undefined,
             receiptDate: now,
+            ...sizeFields,       // overrides the aggregate fields above when size-level data is present
+            ...resolutionFields,
           },
         });
       } else {
@@ -43,6 +72,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             defectQty:   ri.defectQty   != null ? Number(ri.defectQty)   : null,
             notes:       ri.notes       ?? null,
             receiptDate: now,
+            ...sizeFields,       // overrides the aggregate fields above when size-level data is present
+            ...resolutionFields,
           },
         });
       }

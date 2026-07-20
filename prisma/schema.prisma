@@ -32,9 +32,10 @@ model Outlet {
   id          String  @id @default(cuid())
   name        String
   marking     String  @unique   // e.g. JN75-H2UHQ, TH-BFZPV-A
-  country     String  @default("MY")  // MY | TH
+  country     String  @default("MY")  // MY | TH | CN
   address     String?
   isHQ        Boolean @default(false)
+  isWarehouse Boolean @default(false)  // e.g. CN-H2UCNWH — supplier QC staging warehouse, distinct from retail outlets
   isActive    Boolean @default(true)
   createdAt   DateTime @default(now())
 
@@ -259,6 +260,7 @@ model PurchaseOrder {
 
   // Logistics
   destination     String?   // "Melaka HQ" | "Split: HQ + 3 outlets" etc.
+  shipToWarehouse Boolean @default(false)  // supplier ships to CN-H2UCNWH warehouse for QC before onward shipping
   paymentTerms    String?   // "30% deposit / 70% pre-ship"
   paymentIncoterm String?   // "FOB Guangzhou"
   fxRate          Float?    // locked exchange rate ¥/RM
@@ -711,6 +713,34 @@ model OutletReceiptItem {
   defectQty    Int?
   notes        String?
   receiptDate  DateTime?
+
+  // Size-level receiving (warehouse QC flow — kept in sync with the receivedQty/defectQty
+  // aggregates above so existing retail-outlet code paths keep working unmodified)
+  receivedQty35 Int?
+  receivedQty36 Int?
+  receivedQty37 Int?
+  receivedQty38 Int?
+  receivedQty39 Int?
+  receivedQty40 Int?
+  receivedQty41 Int?
+  receivedQty42 Int?
+  defectQty35   Int?
+  defectQty36   Int?
+  defectQty37   Int?
+  defectQty38   Int?
+  defectQty39   Int?
+  defectQty40   Int?
+  defectQty41   Int?
+  defectQty42   Int?
+
+  // Defect resolution (warehouse QC flow)
+  defectResolution      String?    // "return_to_supplier" | "other"
+  defectResolutionNotes String?
+  defectResolvedAt      DateTime?
+
+  // Inventory posting guard — makes "Add to Inventory" idempotent
+  postedToInventory Boolean  @default(false)
+  postedAt          DateTime?
 }
 
 // ─── VENDOR ASSETS ───────────────────────────────────────────────────────────

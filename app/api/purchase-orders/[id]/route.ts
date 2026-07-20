@@ -126,6 +126,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   for (const f of strFields)  if (f in raw) data[f] = raw[f] ?? null;
   for (const f of dateFields) if (f in raw) data[f] = raw[f] ? new Date(raw[f]) : null;
   for (const f of numFields)  if (f in raw) data[f] = raw[f] != null ? Number(raw[f]) : null;
+  if ("shipToWarehouse" in raw) data.shipToWarehouse = !!raw.shipToWarehouse;
 
   // Auto-promote to "shipped" when a ship-out date is set, unless a status change is already included
   if ("shipDate" in raw && raw.shipDate && !("status" in raw)) {
@@ -352,6 +353,55 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const po = Object.keys(data).length > 0
     ? await prisma.purchaseOrder.update({ where: { id }, data, include: { manufacturer: true, items: true } })
     : await prisma.purchaseOrder.findUniqueOrThrow({ where: { id }, include: { manufacturer: true, items: true } });
+
+  // When the PO is routed via the CN warehouse for supplier QC, ensure a warehouse
+  // OutletDelivery + one OutletReceiptItem per PO item exist, and best-effort stamp the
+  // warehouse as each item's destination so the existing packing-list PDF (which reads
+  // outletAllocations) shows the CN-H2UCNWH marking. Never overwrites an item that already
+  // has an explicit retail-outlet split.
+  if (po.shipToWarehouse && ["submitted", "shipped", "closed"].includes(po.status ?? "")) {
+    const warehouseOutlet = await prisma.outlet.findFirst({ where: { isWarehouse: true, isActive: true } });
+    if (warehouseOutlet) {
+      for (const item of po.items) {
+        if (item.outletAllocations) continue;
+        const alloc = [{
+          outletId: warehouseOutlet.id,
+          qty36: item.qty36, qty37: item.qty37, qty38: item.qty38, qty39: item.qty39,
+          qty40: item.qty40, qty41: item.qty41, qty42: item.qty42,
+        }];
+        await prisma.purchaseOrderItem.update({ where: { id: item.id }, data: { outletAllocations: JSON.stringify(alloc) } });
+      }
+
+      let warehouseDelivery = await prisma.outletDelivery.findUnique({
+        where: { poId_outletId: { poId: id, outletId: warehouseOutlet.id } },
+      });
+      if (!warehouseDelivery) {
+        warehouseDelivery = await prisma.outletDelivery.create({
+          data: { poId: id, outletId: warehouseOutlet.id, status: po.status === "shipped" ? "in_transit" : "pending" },
+        });
+      } else if (po.status === "shipped" && warehouseDelivery.status === "pending") {
+        warehouseDelivery = await prisma.outletDelivery.update({
+          where: { id: warehouseDelivery.id }, data: { status: "in_transit" },
+        });
+      }
+
+      const existingReceiptItems = await prisma.outletReceiptItem.findMany({
+        where: { deliveryId: warehouseDelivery.id }, select: { poItemId: true },
+      });
+      const receiptedItemIds = new Set(existingReceiptItems.map(r => r.poItemId));
+      for (const item of po.items) {
+        if (receiptedItemIds.has(item.id)) continue;
+        await prisma.outletReceiptItem.create({
+          data: {
+            deliveryId: warehouseDelivery.id,
+            poItemId: item.id,
+            colorName: item.colorName ?? null,
+            orderedQty: item.totalPairs ?? 0,
+          },
+        });
+      }
+    }
+  }
 
   // Auto-create/update Shipment + Delivery when PO reaches submitted or shipped
   // Skip when shipItems was processed — batch sync above already handled shipments

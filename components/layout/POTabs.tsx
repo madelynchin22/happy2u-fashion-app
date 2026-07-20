@@ -1,13 +1,14 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShoppingCart, CreditCard, AlertTriangle, Store } from "lucide-react";
+import { ShoppingCart, CreditCard, AlertTriangle, Store, Warehouse } from "lucide-react";
 
 const TABS = [
-  { href: "/dashboard/purchase-orders",                   label: "Orders",           icon: ShoppingCart  },
-  { href: "/dashboard/purchase-orders/payment-tracking",  label: "Payment Tracking", icon: CreditCard    },
-  { href: "/dashboard/purchase-orders/defect-list",       label: "Defect List",      icon: AlertTriangle },
-  { href: "/dashboard/purchase-orders/outlet-receipt",    label: "Outlet Receipt",   icon: Store         },
+  { href: "/dashboard/purchase-orders",                    label: "Orders",             icon: ShoppingCart  },
+  { href: "/dashboard/purchase-orders/payment-tracking",   label: "Payment Tracking",   icon: CreditCard    },
+  { href: "/dashboard/purchase-orders/defect-list",        label: "Defect List",        icon: AlertTriangle },
+  { href: "/dashboard/purchase-orders/outlet-receipt",     label: "Outlet Receipt",     icon: Store         },
+  { href: "/dashboard/purchase-orders/warehouse-receiving", label: "Warehouse Receiving", icon: Warehouse    },
 ];
 
 export function POTabs() {

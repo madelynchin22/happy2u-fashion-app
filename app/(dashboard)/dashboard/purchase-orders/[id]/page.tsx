@@ -87,6 +87,7 @@ export default function POEditPage() {
   const [header, setHeader] = useState({
     poNumber: "", status: "draft", poType: "", productName: "", brand: "Happy2U",
     manufacturerId: "", sampleOrderId: "", parentPoNumber: "", destination: "",
+    shipToWarehouse: false,
     fxRate: "0.62", paymentTerms: "", paymentIncoterm: "",
     deliveryDate: "", productionStartDate: "", qcDate: "", shipDate: "",
     sizeCurveInsight: "", notes: "",
@@ -112,6 +113,7 @@ export default function POEditPage() {
         sampleOrderId:       po.sampleOrderId ?? "",
         parentPoNumber:      po.parentPoNumber ?? "",
         destination:         po.destination ?? "",
+        shipToWarehouse:     !!po.shipToWarehouse,
         fxRate:              po.fxRate != null ? String(po.fxRate) : "0.62",
         paymentTerms:        po.paymentTerms ?? "",
         paymentIncoterm:     po.paymentIncoterm ?? "",
@@ -232,6 +234,7 @@ export default function POEditPage() {
         sampleOrderId:       header.sampleOrderId || null,
         parentPoNumber:      header.parentPoNumber || null,
         destination:         header.destination || null,
+        shipToWarehouse:     header.shipToWarehouse,
         fxRate:              parseFloat(header.fxRate) || null,
         paymentTerms:        header.paymentTerms || null,
         paymentIncoterm:     header.paymentIncoterm || null,
@@ -356,6 +359,18 @@ export default function POEditPage() {
           <div>
             <label className="label">Destination</label>
             <input className="input" value={header.destination} onChange={e => setH("destination", e.target.value)} placeholder="e.g. Melaka HQ" />
+          </div>
+
+          {/* Ship to CN Warehouse */}
+          <div className="flex items-end pb-0.5">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={header.shipToWarehouse}
+                onChange={e => { setHeader(prev => ({ ...prev, shipToWarehouse: e.target.checked })); setSaved(false); }}
+              />
+              Ship to CN Warehouse (QC before onward shipping)
+            </label>
           </div>
 
           {/* FX Rate */}

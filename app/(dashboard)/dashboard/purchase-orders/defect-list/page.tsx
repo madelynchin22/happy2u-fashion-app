@@ -12,6 +12,8 @@ type DefectItem = {
   defectQty: number;
   notes: string | null;
   receiptDate: string | null;
+  defectResolution: string | null;
+  defectResolutionNotes: string | null;
   delivery: {
     actualArrival: string | null;
     outlet: { id: string; name: string; marking: string };
@@ -23,6 +25,11 @@ function fmt(d?: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
+
+const RESOLUTION_LABEL: Record<string, string> = {
+  return_to_supplier: "Ship back to supplier",
+  other: "Other",
+};
 
 export default function DefectListPage() {
   const [items, setItems]   = useState<DefectItem[]>([]);
@@ -111,6 +118,7 @@ export default function DefectListPage() {
                   <th className="text-center px-3 py-2">Received</th>
                   <th className="text-center px-3 py-2 text-red-400">Defects</th>
                   <th className="text-left px-3 py-2">Notes</th>
+                  <th className="text-left px-3 py-2">Resolution</th>
                   <th className="text-left px-3 py-2">Reported</th>
                 </tr>
               </thead>
@@ -130,6 +138,16 @@ export default function DefectListPage() {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-xs text-gray-500 max-w-[180px] truncate">{row.notes ?? "—"}</td>
+                    <td className="px-3 py-3 text-xs max-w-[200px]">
+                      {row.defectResolution ? (
+                        <>
+                          <p className="text-gray-700 font-medium">{RESOLUTION_LABEL[row.defectResolution] ?? row.defectResolution}</p>
+                          {row.defectResolutionNotes && <p className="text-gray-400 truncate">{row.defectResolutionNotes}</p>}
+                        </>
+                      ) : (
+                        <span className="text-amber-600 font-medium">Pending</span>
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-xs text-gray-400">{fmt(row.receiptDate)}</td>
                   </tr>
                 ))}
