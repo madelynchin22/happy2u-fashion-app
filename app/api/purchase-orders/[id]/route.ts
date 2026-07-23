@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { generateOrderNumber } from "@/lib/utils";
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -284,53 +283,46 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
-    // ── Auto-batch shipments by date ──────────────────────────────────────────
-    // Each unique itemShipDate = one shared BATCH-YYYY-MM-DD shipment (cross-PO)
+    // ── Sync this PO's own shipment ─────────────────────────────────────────────
+    // One Shipment per PO (shipmentNumber = the PO's own number), not shared
+    // across POs by date. It exists only while at least one SKU has shipped —
+    // its shipDate tracks the earliest shipped colour, and its pairs track how
+    // many pairs have actually shipped so far (not the PO's full order total).
     const itemsWithDates = await prisma.purchaseOrderItem.findMany({
       where: { poId: id },
       select: { itemShipDate: true, totalPairs: true },
     });
-    // Sum pairs per date for this PO
-    const dateToPairs = new Map<string, number>();
-    for (const item of itemsWithDates) {
-      if (!item.itemShipDate) continue;
-      const dateKey = item.itemShipDate.toISOString().split("T")[0];
-      dateToPairs.set(dateKey, (dateToPairs.get(dateKey) ?? 0) + (item.totalPairs ?? 0));
-    }
-    // Find-or-create BATCH shipment for each date, upsert ShipmentItem
-    for (const [dateKey, pairs] of dateToPairs) {
-      const batchNumber = `BATCH-${dateKey}`;
-      let batch = await prisma.shipment.findFirst({ where: { shipmentNumber: batchNumber } });
-      if (!batch) {
-        batch = await prisma.shipment.create({
+    const shipDates = itemsWithDates.map(i => i.itemShipDate).filter((d): d is Date => !!d);
+    const existingShipmentItem = await prisma.shipmentItem.findFirst({ where: { poId: id } });
+
+    if (shipDates.length === 0) {
+      // Nothing shipped (anymore) — remove this PO's shipment if one exists
+      if (existingShipmentItem) {
+        await prisma.shipmentItem.delete({ where: { id: existingShipmentItem.id } });
+        const remaining = await prisma.shipmentItem.count({ where: { shipmentId: existingShipmentItem.shipmentId } });
+        if (remaining === 0) await prisma.shipment.delete({ where: { id: existingShipmentItem.shipmentId } });
+      }
+    } else {
+      const shippedPairs = itemsWithDates
+        .filter(i => i.itemShipDate)
+        .reduce((s, i) => s + (i.totalPairs ?? 0), 0);
+      const earliestShipDate = shipDates.reduce((a, b) => (a < b ? a : b));
+
+      if (existingShipmentItem) {
+        await prisma.shipmentItem.update({ where: { id: existingShipmentItem.id }, data: { totalPairs: shippedPairs } });
+        await prisma.shipment.update({ where: { id: existingShipmentItem.shipmentId }, data: { shipDate: earliestShipDate } });
+      } else {
+        const poForShipment = await prisma.purchaseOrder.findUnique({ where: { id }, select: { poNumber: true } });
+        await prisma.shipment.create({
           data: {
-            shipmentNumber: batchNumber,
-            shipDate: new Date(`${dateKey}T00:00:00.000Z`),
+            shipmentNumber: poForShipment?.poNumber ?? `SHIP-${id.slice(0, 8)}`,
+            shipDate: earliestShipDate,
             status: "in_transit",
             createdById: (session.user as any).id,
+            items: { create: [{ poId: id, totalPairs: shippedPairs }] },
           },
         });
       }
-      const existingSI = await prisma.shipmentItem.findFirst({ where: { shipmentId: batch.id, poId: id } });
-      if (existingSI) {
-        await prisma.shipmentItem.update({ where: { id: existingSI.id }, data: { totalPairs: pairs } });
-      } else {
-        await prisma.shipmentItem.create({ data: { shipmentId: batch.id, poId: id, totalPairs: pairs } });
-      }
-    }
-    // Remove this PO from any BATCH shipments whose date is no longer active
-    const activeDates = new Set(dateToPairs.keys());
-    const linkedBatches = await prisma.shipmentItem.findMany({
-      where: { poId: id },
-      include: { shipment: { select: { id: true, shipmentNumber: true } } },
-    });
-    for (const si of linkedBatches) {
-      if (!si.shipment.shipmentNumber.startsWith("BATCH-")) continue;
-      const dateKey = si.shipment.shipmentNumber.replace("BATCH-", "");
-      if (activeDates.has(dateKey)) continue;
-      await prisma.shipmentItem.delete({ where: { id: si.id } });
-      const remaining = await prisma.shipmentItem.count({ where: { shipmentId: si.shipment.id } });
-      if (remaining === 0) await prisma.shipment.delete({ where: { id: si.shipment.id } });
     }
   }
 
@@ -404,89 +396,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             orderedQty: item.totalPairs ?? 0,
           },
         });
-      }
-    }
-  }
-
-  // Auto-create/update Shipment + Delivery when PO reaches submitted or shipped
-  // Skip when shipItems was processed — batch sync above already handled shipments
-  if (!("shipItems" in raw) && (data.status === "submitted" || data.status === "shipped")) {
-    const existingItem = await prisma.shipmentItem.findFirst({
-      where: { poId: id },
-      include: { shipment: true },
-    });
-
-    if (existingItem) {
-      // PO was already submitted — now shipped: promote shipment to in_transit
-      if (data.status === "shipped" && existingItem.shipment.status === "preparing") {
-        await prisma.shipment.update({
-          where: { id: existingItem.shipmentId },
-          data: {
-            status: "in_transit",
-            shipDate: po.shipDate ?? undefined,
-            estimatedArrival: po.deliveryDate ?? undefined,
-          },
-        });
-      }
-    } else {
-      // First time hitting submitted or shipped — create Shipment + Delivery
-      const count = await prisma.shipment.count();
-      const shipmentNumber = generateOrderNumber("SH", count + 1);
-      const newShipment = await prisma.shipment.create({
-        data: {
-          shipmentNumber,
-          status: data.status === "shipped" ? "in_transit" : "preparing",
-          shipDate: data.status === "shipped" ? (po.shipDate ?? null) : null,
-          estimatedArrival: po.deliveryDate ?? null,
-          createdById: (session.user as any).id,
-          items: { create: [{ poId: id, totalPairs: po.totalPairs ?? 0 }] },
-        },
-      });
-
-      // Auto-create one Delivery per outlet based on outletAllocations; fall back to HQ if none
-      const allPoItems = await prisma.purchaseOrderItem.findMany({ where: { poId: id } });
-      const outletDeliveryMap = new Map<string, { poItemId: string; supplierSku: string | null; h2uSku: string | null; colorName: string | null; expectedQty: number }[]>();
-      for (const item of allPoItems) {
-        if (item.outletAllocations) {
-          try {
-            const allocs: Record<string, any>[] = JSON.parse(item.outletAllocations);
-            for (const alloc of allocs) {
-              if (!alloc.outletId) continue;
-              const qty = ["qty35","qty36","qty37","qty38","qty39","qty40","qty41","qty42"]
-                .reduce((s, k) => s + (Number(alloc[k]) || 0), 0);
-              if (qty === 0) continue;
-              if (!outletDeliveryMap.has(alloc.outletId)) outletDeliveryMap.set(alloc.outletId, []);
-              outletDeliveryMap.get(alloc.outletId)!.push({
-                poItemId: item.id, supplierSku: item.supplierSku ?? null,
-                h2uSku: item.h2uSku ?? null, colorName: item.colorName ?? null, expectedQty: qty,
-              });
-            }
-          } catch {}
-        }
-      }
-      // Fall back: if no allocations at all, create one delivery for HQ with all items
-      if (outletDeliveryMap.size === 0) {
-        const hqOutlet = await prisma.outlet.findFirst({ where: { isHQ: true } }) ?? await prisma.outlet.findFirst();
-        if (hqOutlet) {
-          outletDeliveryMap.set(hqOutlet.id, allPoItems.map(item => ({
-            poItemId: item.id, supplierSku: item.supplierSku ?? null,
-            h2uSku: item.h2uSku ?? null, colorName: item.colorName ?? null, expectedQty: item.totalPairs ?? 0,
-          })));
-        }
-      }
-      for (const [outletId, deliveryItems] of outletDeliveryMap) {
-        if (deliveryItems.length === 0) continue;
-        const alreadyExists = await prisma.delivery.findFirst({ where: { shipmentId: newShipment.id, outletId } });
-        if (!alreadyExists) {
-          await prisma.delivery.create({
-            data: {
-              shipmentId: newShipment.id, outletId,
-              status: "pending",
-              createdById: (session.user as any).id,
-              items: { create: deliveryItems.map(di => ({ ...di, receivedQty: 0 })) },
-            },
-          });
-        }
       }
     }
   }

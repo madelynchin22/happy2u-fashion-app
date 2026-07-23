@@ -385,7 +385,17 @@ function Timeline({ po, onSave, onItemShipSave }: {
   const now          = new Date();
   const poSentDate   = po.date         ? new Date(po.date)         : null;
   const arriveActual = po.deliveryDate ? new Date(po.deliveryDate) : null;
-  const estArrive    = poSentDate      ? addDays(poSentDate, 70)   : null;
+
+  // Stage 2 — Supplier Ship: actual = earliest per-colour ship date; target = PO submit + 50d
+  const shipDates    = po.items.map(i => i.itemShipDate).filter((d): d is string => !!d).map(d => new Date(d));
+  const earliestShip = shipDates.length > 0 ? shipDates.reduce((a, b) => (a < b ? a : b)) : null;
+  const targetSupplierShip = poSentDate ? addDays(poSentDate, 50) : null;
+
+  // Stage 3 — Actual Arrival: actual = po.deliveryDate; target = earliest ship date + 25d
+  const targetArrival = earliestShip ? addDays(earliestShip, 25) : null;
+
+  // Stage 4 — Targeted Launch: target-only, = actual arrival + 3d (or projected from target arrival)
+  const targetLaunch = arriveActual ? addDays(arriveActual, 3) : (targetArrival ? addDays(targetArrival, 3) : null);
 
   type SkuItem = PODetail["items"][0];
   type SkuGroup = { key: string; photoUrl?: string | null; colorName?: string | null; pairs: number; items: SkuItem[] };
@@ -412,8 +422,8 @@ function Timeline({ po, onSave, onItemShipSave }: {
   const shippedGroups = skuGroups.filter(g => g.items.some(i => itemDate(i) !== "")).length;
   const allShipped    = totalGroups > 0 && shippedGroups === totalGroups;
 
-  const daysToArrive = (arriveActual ?? estArrive)
-    ? Math.ceil(((arriveActual ?? estArrive)!.getTime() - now.getTime()) / 86400000)
+  const daysToArrive = (arriveActual ?? targetArrival)
+    ? Math.ceil(((arriveActual ?? targetArrival)!.getTime() - now.getTime()) / 86400000)
     : null;
 
   return (
@@ -431,10 +441,13 @@ function Timeline({ po, onSave, onItemShipSave }: {
       <div>
         <div className="flex items-center gap-2 mb-1.5">
           {[
-            { label: "PO submitted", done: !!poSentDate, date: poSentDate ? fmtDate(poSentDate) : null },
-            { label: `${shippedGroups}/${totalGroups} SKUs shipped`, done: shippedGroups > 0, date: null },
-            { label: "All shipped", done: allShipped, date: null },
-            { label: "Arrived", done: !!arriveActual, date: arriveActual ? fmtDate(arriveActual) : (estArrive ? `Est. ${fmtDate(estArrive)}` : null) },
+            { label: "PO Submitted", done: !!poSentDate, actual: poSentDate ? fmtDate(poSentDate) : null, target: null },
+            { label: "Supplier Ship", done: !!earliestShip, actual: earliestShip ? fmtDate(earliestShip) : null,
+              target: targetSupplierShip ? `Target ${fmtDate(targetSupplierShip)}` : null },
+            { label: "Actual Arrival", done: !!arriveActual, actual: arriveActual ? fmtDate(arriveActual) : null,
+              target: targetArrival ? `Target ${fmtDate(targetArrival)}` : null },
+            { label: "Targeted Launch", done: false, actual: null,
+              target: targetLaunch ? fmtDate(targetLaunch) : null },
           ].map((stage, i, arr) => (
             <React.Fragment key={i}>
               <div className="flex flex-col items-center gap-1 flex-shrink-0">
@@ -444,11 +457,12 @@ function Timeline({ po, onSave, onItemShipSave }: {
                   {stage.done && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>}
                 </div>
                 <p className="text-[10px] text-gray-500 whitespace-nowrap">{stage.label}</p>
-                {stage.date && <p className="text-[10px] text-gray-400">{stage.date}</p>}
+                {stage.actual && <p className="text-[10px] text-gray-400">{stage.actual}</p>}
+                {stage.target && <p className="text-[9px] text-amber-500 whitespace-nowrap">{stage.target}</p>}
               </div>
               {i < arr.length - 1 && (
                 <div className="flex-1 h-0.5 bg-gray-200 mb-5">
-                  <div className={`h-full bg-green-500 transition-all`} style={{ width: i < shippedGroups ? "100%" : "0%" }} />
+                  <div className="h-full bg-green-500 transition-all" style={{ width: arr[i].done ? "100%" : "0%" }} />
                 </div>
               )}
             </React.Fragment>
@@ -528,16 +542,30 @@ function Timeline({ po, onSave, onItemShipSave }: {
             })}
           </div>
           {/* Arrival date */}
-          <div className="border-t border-gray-200 bg-gray-50 px-4 py-2.5 rounded-b-xl flex items-center justify-between">
-            <p className="text-xs font-medium text-gray-600">Arrive at warehouse</p>
-            {onSave ? (
-              <input type="date"
-                className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 focus:outline-none focus:border-brand-400 w-28"
-                defaultValue={arriveActual ? arriveActual.toISOString().split("T")[0] : ""}
-                onChange={e => { if (e.target.value) onSave("deliveryDate", e.target.value); }}
-              />
-            ) : (
-              <p className="text-xs text-gray-500">{arriveActual ? fmtDate(arriveActual) : estArrive ? `Est. ${fmtDate(estArrive)}` : "—"}</p>
+          <div className="border-t border-gray-200 bg-gray-50 px-4 py-2.5 rounded-b-xl space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-gray-600">Actual Arrival Date</p>
+              {onSave ? (
+                <input type="date"
+                  className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 focus:outline-none focus:border-brand-400 w-28"
+                  defaultValue={arriveActual ? arriveActual.toISOString().split("T")[0] : ""}
+                  onChange={e => { if (e.target.value) onSave("deliveryDate", e.target.value); }}
+                />
+              ) : (
+                <p className="text-xs text-gray-500">{arriveActual ? fmtDate(arriveActual) : "—"}</p>
+              )}
+            </div>
+            {targetArrival && (
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-gray-400">Targeted Arrival Date</p>
+                <p className="text-[11px] text-amber-500">{fmtDate(targetArrival)}</p>
+              </div>
+            )}
+            {targetLaunch && (
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-gray-400">Targeted Launch Date</p>
+                <p className="text-[11px] text-amber-500">{fmtDate(targetLaunch)}</p>
+              </div>
             )}
           </div>
         </div>

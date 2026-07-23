@@ -155,6 +155,20 @@ export default function ShipmentsPage() {
     return true;
   }), [shipments, filter, modeFilter, now]);
 
+  // Group by the PO each shipment belongs to — each shipping-marked PO gets its own
+  // shipment now, so this is what "grouped by PO number" naturally means here.
+  const groupedShipments = useMemo(() => {
+    const groups: { key: string; poId: string | null; label: string; shipments: Shipment[] }[] = [];
+    for (const s of filtered) {
+      const po = s.items[0]?.po;
+      const key = po?.poNumber ?? "__unlinked__";
+      let g = groups.find(g => g.key === key);
+      if (!g) { g = { key, poId: po?.id ?? null, label: po?.poNumber ?? "Not linked to a PO", shipments: [] }; groups.push(g); }
+      g.shipments.push(s);
+    }
+    return groups;
+  }, [filtered]);
+
   async function save() {
     setSaving(true);
     const res = await fetch("/api/shipments", {
@@ -292,7 +306,25 @@ export default function ShipmentsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filtered.map(s => {
+              {groupedShipments.flatMap(g => [
+                <tr key={`g-${g.key}`} className="bg-gray-900">
+                  <td colSpan={8} className="px-4 py-2">
+                    <div className="flex items-center gap-3">
+                      {g.poId ? (
+                        <Link href={`/dashboard/purchase-orders?open=${g.poId}`}
+                          className="text-white text-xs font-bold tracking-widest uppercase hover:underline flex items-center gap-1">
+                          {g.label} <ArrowUpRight size={11} />
+                        </Link>
+                      ) : (
+                        <span className="text-gray-400 text-xs font-bold tracking-widest uppercase">{g.label}</span>
+                      )}
+                      <span className="text-gray-400 text-[11px]">
+                        {g.shipments.length} shipment{g.shipments.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                  </td>
+                </tr>,
+                ...g.shipments.map(s => {
                 const late   = daysLate(s, now);
                 const mode   = detectMode(s);
                 const isSelected = selected?.id === s.id;
@@ -349,7 +381,8 @@ export default function ShipmentsPage() {
                     </td>
                   </tr>
                 );
-              })}
+                }),
+              ])}
             </tbody>
           </table>
         )}
