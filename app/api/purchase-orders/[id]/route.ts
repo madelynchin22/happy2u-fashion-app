@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "crypto";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -166,6 +165,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Full items replacement when provided
   if ("items" in raw && Array.isArray(raw.items)) {
     const cleanItems = raw.items.map((item: any) => ({
+      id: item.id ?? null,
       poId: id,
       sampleOrderId:   item.sampleOrderId   ?? null,
       supplierSku:     item.supplierSku      ?? null,
@@ -196,34 +196,39 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       outletAllocations: item.outletAllocations ?? null,
     }));
 
-    // Delete and recreate inside a transaction so a failed insert rolls back the delete.
-    // Uses $executeRaw to bypass Prisma ORM-level validation quirks on SQLite interactive
-    // transactions while still enforcing real DB-level FK constraints.
+    // Update existing items in place (matched by id) and only create/delete what
+    // actually changed, instead of delete-all-then-recreate. The old approach broke
+    // as soon as a PO had any downstream Delivery/PackingList records — those tables
+    // hold a real foreign key to a specific PurchaseOrderItem row, so deleting and
+    // reinserting with a fresh id violated that constraint the moment a PO had
+    // shipped far enough to have QC/delivery records.
     try {
       await prisma.$transaction(async (tx) => {
-        await tx.purchaseOrderItem.deleteMany({ where: { poId: id } });
-        for (const ci of cleanItems) {
-          const itemId = randomUUID();
-          await tx.$executeRaw`
-            INSERT INTO "PurchaseOrderItem" (
-              "id","poId","sampleOrderId","supplierSku","h2uSku","colorName","colorCode","brand",
-              "materialUpper","materialLining","materialMidsole","materialOutsole","hardware","logoSpec",
-              "remark","photoUrl","deliveryDate","qty35","qty36","qty37","qty38","qty39","qty40","qty41","qty42",
-              "totalPairs","discountPrice","lineTotal","outletAllocations"
-            ) VALUES (
-              ${itemId},${ci.poId},${ci.sampleOrderId},${ci.supplierSku},${ci.h2uSku},
-              ${ci.colorName},${ci.colorCode},${ci.brand},${ci.materialUpper},${ci.materialLining},
-              ${ci.materialMidsole},${ci.materialOutsole},${ci.hardware},${ci.logoSpec},
-              ${ci.remark},${ci.photoUrl},${ci.deliveryDate},${ci.qty35},${ci.qty36},${ci.qty37},${ci.qty38},
-              ${ci.qty39},${ci.qty40},${ci.qty41},${ci.qty42},
-              ${ci.totalPairs},${ci.discountPrice},${ci.lineTotal},${ci.outletAllocations}
-            )
-          `;
+        const existing = await tx.purchaseOrderItem.findMany({ where: { poId: id }, select: { id: true } });
+        const existingIds = new Set(existing.map(e => e.id));
+        const incomingIds = new Set(cleanItems.filter((ci: any) => ci.id).map((ci: any) => ci.id));
+
+        const removedIds = [...existingIds].filter(eid => !incomingIds.has(eid));
+        if (removedIds.length > 0) {
+          await tx.purchaseOrderItem.deleteMany({ where: { id: { in: removedIds } } });
+        }
+
+        for (const { id: itemId, ...fields } of cleanItems) {
+          if (itemId && existingIds.has(itemId)) {
+            await tx.purchaseOrderItem.update({ where: { id: itemId }, data: fields });
+          } else {
+            await tx.purchaseOrderItem.create({ data: fields });
+          }
         }
       });
     } catch (err: any) {
       console.error("[PATCH /api/purchase-orders] items transaction failed:", err?.message ?? err);
-      return NextResponse.json({ error: err?.message ?? "Failed to save items" }, { status: 500 });
+      const isFkError = err?.code === "P2003" || /foreign key|violates|restrict/i.test(err?.message ?? "");
+      return NextResponse.json({
+        error: isFkError
+          ? "Can't remove one of these colours — it already has linked delivery, QC, or packing-list records. Uncheck it instead of deleting the row, or ask an admin to remove those records first."
+          : (err?.message ?? "Failed to save items"),
+      }, { status: 500 });
     }
 
     data.totalPairs = cleanItems.reduce((s: number, i: any) => s + i.totalPairs, 0);

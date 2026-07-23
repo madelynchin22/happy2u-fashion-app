@@ -558,6 +558,7 @@ type OutletAlloc = {
 };
 
 type DraftItem = {
+  id?: string; // present for existing rows — lets the save endpoint update in place
   included:      boolean;
   colorName:     string;
   qty36: number; qty37: number; qty38: number; qty39: number;
@@ -646,6 +647,7 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
     if (!po) return;
 
     const items: DraftItem[] = po.items.map(item => ({
+      id:           item.id,
       included:     true,
       colorName:    item.colorName ?? "",
       qty36: item.qty36 ?? 0, qty37: item.qty37 ?? 0,
@@ -768,6 +770,7 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
       const totalPairs = itemTotal(item);
       const lineTotal  = totalPairs * (item.discountPrice || 0);
       return {
+        id: item.id, // update the existing row in place when present; omitted → treated as new
         colorName: item.colorName || null,
         qty35: 0, qty36: item.qty36, qty37: item.qty37, qty38: item.qty38,
         qty39: item.qty39, qty40: item.qty40, qty41: item.qty41, qty42: item.qty42,

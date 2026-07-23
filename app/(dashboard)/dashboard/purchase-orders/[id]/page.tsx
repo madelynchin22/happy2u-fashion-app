@@ -246,6 +246,7 @@ export default function POEditPage() {
         notes:               header.notes || null,
         allocations:         allocations.length > 0 ? JSON.stringify(allocations) : null,
         items: items.map(i => ({
+          id:              i.id,
           sampleOrderId:   i.sampleOrderId ?? null,
           supplierSku:     i.supplierSku   || null,
           h2uSku:          i.h2uSku        || null,
