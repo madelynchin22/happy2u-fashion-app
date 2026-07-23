@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { Plus, Plane, Ship, ArrowUpRight, AlertTriangle, X, ExternalLink } from "lucide-react";
 import { format, differenceInDays, addDays, isWithinInterval } from "date-fns";
+import { Timeline, TimelinePO } from "@/components/purchase-orders/Timeline";
 
 type ShipmentEvent = { id: string; eventType: string; eventDate: string; location?: string; notes?: string };
 type Shipment = {
@@ -60,32 +61,9 @@ const STATUS_LABEL: Record<string, string> = {
   customs:    "Customs", arrived: "Arriving soon", delivered: "Delivered",
 };
 
-const TIMELINE_STEPS = [
-  { key: "ready",    label: "Ready" },
-  { key: "picked_up", label: "Picked up" },
-  { key: "departed", label: "Departed origin" },
-  { key: "customs",  label: "Customs" },
-  { key: "out_for_delivery", label: "Out for delivery" },
-  { key: "delivered", label: "Delivered" },
-];
-
-function currentStep(status: string): number {
-  if (status === "preparing")  return 0;
-  if (status === "in_transit") return 2;
-  if (status === "customs")    return 3;
-  if (status === "arrived")    return 4;
-  if (status === "delivered")  return 5;
-  return 0;
-}
-
 function fmtDate(d?: string) {
   if (!d) return "—";
   return format(new Date(d), "dd/MM/yyyy");
-}
-
-function fmtShort(d?: string) {
-  if (!d) return "—";
-  return format(new Date(d), "dd/MM");
 }
 
 function isBatch(s: Shipment) { return s.shipmentNumber.startsWith("BATCH-"); }
@@ -115,6 +93,7 @@ export default function ShipmentsPage() {
   const [pos, setPos]             = useState<{id:string;poNumber:string}[]>([]);
   const [saving, setSaving]       = useState(false);
   const [now, setNow]             = useState(() => new Date());
+  const [poDetail, setPoDetail]   = useState<TimelinePO & { id: string } | null>(null);
   const [form, setForm]           = useState({
     containerNumber:"", vesselName:"", blNumber:"", portOrigin:"", portDestination:"",
     shipDate:"", estimatedArrival:"", destinationId:"", notes:"", poIds:[] as string[],
@@ -135,6 +114,37 @@ export default function ShipmentsPage() {
     const poll = setInterval(loadShipments, 300_000);
     return () => { clearInterval(tick); clearInterval(poll); };
   }, []);
+
+  useEffect(() => {
+    const poId = selected?.items[0]?.po.id;
+    if (!poId) { setPoDetail(null); return; }
+    fetch(`/api/purchase-orders/${poId}`).then(r => r.json()).then(setPoDetail).catch(() => {});
+  }, [selected?.id]);
+
+  async function refreshPoDetail(poId: string) {
+    const fresh = await fetch(`/api/purchase-orders/${poId}`).then(r => r.json());
+    if (fresh?.id) setPoDetail(fresh);
+    loadShipments();
+  }
+
+  async function saveDeliveryDate(field: "shipDate" | "deliveryDate", value: string) {
+    if (!poDetail) return;
+    await fetch(`/api/purchase-orders/${poDetail.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    });
+    await refreshPoDetail(poDetail.id);
+  }
+
+  async function saveItemShip(itemIds: string[], date: string | null) {
+    if (!poDetail) return;
+    const res = await fetch(`/api/purchase-orders/${poDetail.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shipItems: itemIds.map(itemId => ({ id: itemId, itemShipDate: date })) }),
+    });
+    if (!res.ok) { console.error("[shipItems save] PATCH failed", res.status); return; }
+    await refreshPoDetail(poDetail.id);
+  }
 
   const inTransit       = shipments.filter(s => s.status === "in_transit").length;
   const awaitingPickup  = shipments.filter(s => s.status === "preparing").length;
@@ -201,7 +211,6 @@ export default function ShipmentsPage() {
 
   const selMode = selected ? detectMode(selected) : "sea";
   const selLate = selected ? daysLate(selected, now) : null;
-  const selStep = selected ? currentStep(selected.status) : 0;
   const selTrack = selected ? trackingUrl(selected) : null;
 
   return (
@@ -477,45 +486,12 @@ export default function ShipmentsPage() {
             </div>
 
             {/* Timeline */}
-            <div>
-              <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-3">Shipment timeline</p>
-              <div className="relative">
-                <div className="flex items-center justify-between relative">
-                  {/* connector line */}
-                  <div className="absolute left-0 right-0 top-3 h-0.5 bg-gray-100" />
-                  <div className="absolute left-0 top-3 h-0.5 bg-teal-500 transition-all"
-                    style={{ width: `${(selStep / (TIMELINE_STEPS.length - 1)) * 100}%` }} />
-                  {TIMELINE_STEPS.map((step, i) => {
-                    const done    = i < selStep;
-                    const current = i === selStep;
-                    const isAlert = step.key === "customs" && isCustoms;
-                    return (
-                      <div key={step.key} className="flex flex-col items-center relative z-10" style={{ minWidth: 60 }}>
-                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs ${
-                          isAlert  ? "bg-red-100 border-red-400 text-red-600" :
-                          done     ? "bg-teal-500 border-teal-500 text-white" :
-                          current  ? "bg-white border-teal-500" :
-                                     "bg-white border-gray-200"
-                        }`}>
-                          {isAlert ? "!" : done ? "✓" : ""}
-                        </div>
-                        <p className={`text-[10px] mt-1.5 text-center leading-tight ${current ? "text-gray-900 font-semibold" : "text-gray-400"}`}>
-                          {step.label}
-                        </p>
-                        {i === 0 && selected.shipDate && (
-                          <p className="text-[9px] text-gray-400">{fmtShort(selected.shipDate)}</p>
-                        )}
-                        {i === selStep && i > 0 && (
-                          <p className="text-[9px] text-gray-400">now</p>
-                        )}
-                        {i === TIMELINE_STEPS.length - 1 && selected.estimatedArrival && (
-                          <p className="text-[9px] text-gray-400">{fmtShort(selected.estimatedArrival)}</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+            <div className="border border-gray-100 rounded-xl p-5">
+              {poDetail ? (
+                <Timeline po={poDetail} onSave={saveDeliveryDate} onItemShipSave={saveItemShip} />
+              ) : (
+                <p className="text-xs text-gray-400">Loading timeline…</p>
+              )}
             </div>
 
             {/* Events / alerts */}
@@ -542,35 +518,6 @@ export default function ShipmentsPage() {
               <div className="flex items-start gap-3 p-3 rounded-lg bg-red-50 border border-red-100">
                 <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
                 <p className="text-sm text-red-700">Shipment is currently held at customs. Add a shipment event to track progress.</p>
-              </div>
-            )}
-
-            {/* Cargo details */}
-            {selected.items.length > 0 && (
-              <div>
-                <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-2">Cargo details</p>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-100">
-                      {["LINKED PO","PRODUCT","PAIRS"].map(h => (
-                        <th key={h} className="pb-2 text-left text-[10px] font-semibold tracking-widest text-gray-400">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {selected.items.map((item, i) => (
-                      <tr key={i}>
-                        <td className="py-2.5 text-xs font-medium">
-                          <Link href={`/dashboard/purchase-orders?open=${item.po.id}`} className="text-brand-600 hover:underline">
-                            {item.po.poNumber}
-                          </Link>
-                        </td>
-                        <td className="py-2.5 text-gray-800">{item.po.productName ?? "—"}</td>
-                        <td className="py-2.5 text-gray-700">{item.totalPairs ?? (item.po as any).totalPairs ?? "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
             )}
 
