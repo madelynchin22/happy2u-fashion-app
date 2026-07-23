@@ -1348,12 +1348,41 @@ function PurchaseOrdersContent() {
     setPlPicker({ baseUrl });
   }
 
-  async function quickSubmit(id: string, e: React.MouseEvent) {
+  // Per-row inline date picker, keyed by PO id — used both to choose the date a
+  // draft is submitted on, and to correct that date afterward.
+  const [dateEdits, setDateEdits] = useState<Record<string, string>>({});
+
+  function toDateInputValue(d?: string | null): string {
+    const dt = d ? new Date(d) : new Date();
+    return dt.toISOString().split("T")[0];
+  }
+
+  function startDateEdit(id: string, current: string | undefined, e: React.MouseEvent) {
+    e.stopPropagation();
+    setDateEdits(prev => ({ ...prev, [id]: toDateInputValue(current) }));
+  }
+
+  function cancelDateEdit(id: string) {
+    setDateEdits(prev => { const n = { ...prev }; delete n[id]; return n; });
+  }
+
+  async function submitWithDate(id: string, dateStr: string, e: React.MouseEvent) {
     e.stopPropagation();
     await fetch(`/api/purchase-orders/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "submitted", date: new Date().toISOString() }),
+      body: JSON.stringify({ status: "submitted", date: dateStr }),
     });
+    cancelDateEdit(id);
+    loadPos();
+  }
+
+  async function saveDateOnly(id: string, dateStr: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    await fetch(`/api/purchase-orders/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: dateStr }),
+    });
+    cancelDateEdit(id);
     loadPos();
   }
 
@@ -1745,13 +1774,38 @@ function PurchaseOrdersContent() {
                           ) : (
                             <span className="text-xs text-gray-400">on time</span>
                           )}
-                          {p.status === "draft" && (
+                          {dateEdits[p.id] !== undefined ? (
+                            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                              <input type="date" value={dateEdits[p.id]}
+                                onChange={e => setDateEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                className="text-[10px] border border-gray-200 rounded px-1 py-0.5 w-[108px]" />
+                              <button
+                                onClick={e => p.status === "draft" ? submitWithDate(p.id, dateEdits[p.id], e) : saveDateOnly(p.id, dateEdits[p.id], e)}
+                                title={p.status === "draft" ? "Submit with this date" : "Save date"}
+                                className="px-2 py-0.5 text-[10px] font-semibold bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors shrink-0"
+                              >
+                                {p.status === "draft" ? "Submit" : "Save"}
+                              </button>
+                              <button onClick={() => cancelDateEdit(p.id)} title="Cancel"
+                                className="p-0.5 text-gray-300 hover:text-gray-500 rounded transition-colors shrink-0">
+                                <X size={11} />
+                              </button>
+                            </div>
+                          ) : p.status === "draft" ? (
                             <button
-                              onClick={e => quickSubmit(p.id, e)}
-                              title="Submit this PO"
+                              onClick={e => startDateEdit(p.id, p.date, e)}
+                              title="Choose submit date"
                               className="px-2 py-0.5 text-[10px] font-semibold bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors shrink-0"
                             >
                               Submit
+                            </button>
+                          ) : (
+                            <button
+                              onClick={e => startDateEdit(p.id, p.date, e)}
+                              title="Edit submit date"
+                              className="p-1 text-gray-300 hover:text-brand-600 hover:bg-brand-50 rounded transition-colors shrink-0"
+                            >
+                              <Edit2 size={11} />
                             </button>
                           )}
                           <button
