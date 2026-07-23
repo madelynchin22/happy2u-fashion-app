@@ -1566,10 +1566,9 @@ function PurchaseOrdersContent() {
                   const year       = mGroup.mk.split("-")[0];
                   const monthAbbr  = mGroup.ml.split(" ")[0];          // "MAY"
                   const firstPoNum  = sGroup.pos[0]?.poNumber ?? "";
-                  const poNumMatch  = firstPoNum.match(/^([A-Za-z]+)-(\d+)$/);
-                  const poCode      = poNumMatch
-                    ? `PO-${year}-${poNumMatch[1].toUpperCase()}${poNumMatch[2]}`
-                    : `PO-${year}-${monthAbbr}${String(si + 1).padStart(2, "0")}`;
+                  // Always show the real stored PO number — only fabricate a placeholder
+                  // in the defensive case where a PO somehow has none at all.
+                  const poCode      = firstPoNum || `PO-${year}-${monthAbbr}${String(si + 1).padStart(2, "0")}`;
                   const totalPairs = sGroup.pos.reduce((s, p) => s + p.totalPairs, 0);
                   const totalRmb   = sGroup.pos.reduce((s, p) => s + p.totalPrice, 0);
                   const totalRm    = sGroup.pos.reduce((s, p) => s + (p.fxRate ? p.totalPrice * p.fxRate : p.totalPrice * 0.62), 0);
