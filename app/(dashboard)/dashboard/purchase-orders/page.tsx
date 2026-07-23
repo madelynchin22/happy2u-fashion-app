@@ -872,7 +872,7 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
               <Download size={14} /> Download PL
             </button>
           )}
-          {po.status === "draft" && !editing && (
+          {!editing && (
             <button onClick={startEdit}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700">
               <Edit2 size={14} /> Edit
@@ -886,16 +886,10 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
               </button>
               <button onClick={saveDraft} disabled={draftSaving}
                 className="px-3 py-1.5 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-800">
-                {draftSaving ? "Saving…" : "Save draft"}
+                {draftSaving ? "Saving…" : po.status === "draft" ? "Save draft" : "Save changes"}
               </button>
             </>
           )}
-          {/* Full edit page — same trigger for every status, not just non-draft POs,
-              since it's the only place with Status/Type/Incoterm/warehouse-routing etc. */}
-          <Link href={`/dashboard/purchase-orders/${id}`}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700">
-            <Edit2 size={14} /> {po.status === "draft" ? "Full edit ↗" : "Edit"}
-          </Link>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
             <X size={16} />
           </button>
