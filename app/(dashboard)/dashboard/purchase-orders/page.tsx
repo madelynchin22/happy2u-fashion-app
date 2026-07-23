@@ -43,6 +43,9 @@ type OutletDelivery = {
 type PODetail = Omit<PO, "items"> & {
   items: {
     id: string; colorName?: string; colorCode?: string; supplierSku?: string; h2uSku?: string; photoUrl?: string | null;
+    sampleOrderId?: string | null; brand?: string | null;
+    materialUpper?: string | null; materialLining?: string | null; materialMidsole?: string | null; materialOutsole?: string | null;
+    hardware?: string | null; logoSpec?: string | null; remark?: string | null; deliveryDate?: string | null;
     qty35: number; qty36: number; qty37: number; qty38: number;
     qty39: number; qty40: number; qty41: number; qty42: number;
     totalPairs: number; discountPrice?: number; lineTotal?: number;
@@ -547,10 +550,24 @@ type DraftItem = {
   qty40: number; qty41: number; qty42: number;
   discountPrice: number;
   outletAllocations: OutletAlloc[]; // per-outlet size breakdown
+  // Carried through unedited so "Save draft" doesn't wipe them on the full items-replace —
+  // also used to disambiguate colours that repeat across different SKUs in the same PO.
+  h2uSku?: string | null; supplierSku?: string | null; colorCode?: string | null;
+  sampleOrderId?: string | null; brand?: string | null;
+  materialUpper?: string | null; materialLining?: string | null; materialMidsole?: string | null; materialOutsole?: string | null;
+  hardware?: string | null; logoSpec?: string | null; remark?: string | null;
+  photoUrl?: string | null; deliveryDate?: string | null;
 };
 
 function itemTotal(item: DraftItem) {
   return EDIT_SIZES.reduce((s, sz) => s + ((item as any)[`qty${sz}`] as number || 0), 0);
+}
+
+// SKU + colour, so the same colour name repeated across different styles (e.g. two SKUs
+// that each have a "Beige") is still distinguishable in the outlet-allocation picker.
+function itemLabel(item: DraftItem) {
+  const sku = item.h2uSku || item.supplierSku;
+  return sku ? `${sku} · ${item.colorName || "—"}` : (item.colorName || "—");
 }
 
 function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () => void; onRefreshList?: () => void }) {
@@ -623,6 +640,12 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
       qty42: item.qty42 ?? 0,
       discountPrice: item.discountPrice ?? 0,
       outletAllocations: item.outletAllocations ? JSON.parse(item.outletAllocations) : [],
+      h2uSku: item.h2uSku ?? null, supplierSku: item.supplierSku ?? null, colorCode: item.colorCode ?? null,
+      sampleOrderId: item.sampleOrderId ?? null, brand: item.brand ?? null,
+      materialUpper: item.materialUpper ?? null, materialLining: item.materialLining ?? null,
+      materialMidsole: item.materialMidsole ?? null, materialOutsole: item.materialOutsole ?? null,
+      hardware: item.hardware ?? null, logoSpec: item.logoSpec ?? null, remark: item.remark ?? null,
+      photoUrl: item.photoUrl ?? null, deliveryDate: item.deliveryDate ?? null,
     }));
 
     // When a Main SKU exists in Product Library, use its colors as source of truth.
@@ -737,6 +760,14 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
         totalPairs, discountPrice: item.discountPrice || null, lineTotal,
         outletAllocations: Array.isArray(item.outletAllocations) && item.outletAllocations.length > 0
           ? JSON.stringify(item.outletAllocations) : null,
+        // Preserve fields this editor doesn't touch — the save endpoint fully replaces
+        // items, so anything omitted here would otherwise get wiped out.
+        h2uSku: item.h2uSku ?? null, supplierSku: item.supplierSku ?? null, colorCode: item.colorCode ?? null,
+        sampleOrderId: item.sampleOrderId ?? null, brand: item.brand ?? null,
+        materialUpper: item.materialUpper ?? null, materialLining: item.materialLining ?? null,
+        materialMidsole: item.materialMidsole ?? null, materialOutsole: item.materialOutsole ?? null,
+        hardware: item.hardware ?? null, logoSpec: item.logoSpec ?? null, remark: item.remark ?? null,
+        photoUrl: item.photoUrl ?? null, deliveryDate: item.deliveryDate ?? null,
       };
     });
     const res = await fetch(`/api/purchase-orders/${id}`, {
@@ -935,7 +966,7 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
                                   ? "bg-gray-900 text-white"
                                   : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
                               }`}>
-                              {item.colorName || "—"}
+                              {itemLabel(item)}
                               {colTotal > 0 && <span className="ml-1 opacity-60">({colTotal})</span>}
                             </button>
                           );
@@ -985,7 +1016,7 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
                           })}
                           {/* Total row */}
                           <tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
-                            <td className="px-4 py-2 text-xs text-gray-600">Total → {colorItem.colorName}</td>
+                            <td className="px-4 py-2 text-xs text-gray-600">Total → {itemLabel(colorItem)}</td>
                             {EDIT_SIZES.map(sz => (
                               <td key={sz} className="px-1 py-2 text-center text-gray-900 text-sm">
                                 {(colorItem as any)[`qty${sz}`] > 0 ? (colorItem as any)[`qty${sz}`] : <span className="text-gray-300">—</span>}
@@ -1034,6 +1065,9 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
                                 value={item.colorName}
                                 disabled={!item.included}
                                 onChange={e => updateItem(idx, "colorName", e.target.value)} />
+                              {(item.h2uSku || item.supplierSku) && (
+                                <p className="text-[10px] text-gray-400 font-mono mt-0.5">{item.h2uSku || item.supplierSku}</p>
+                              )}
                             </td>
                             {outlets.length === 0 && EDIT_SIZES.map(sz => (
                               <td key={sz} className="px-1 py-2">
