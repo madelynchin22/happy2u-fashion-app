@@ -242,6 +242,10 @@ model PurchaseOrder {
   id              String  @id @default(cuid())
   poNumber        String  @unique  // PO-2026-001
   date            DateTime @default(now())
+  // "YYYY-MM" chosen explicitly on the New PO form — the source of truth for the
+  // month-tab grouping on the PO list. Set once at creation; never touched by
+  // later edits to `date` or to the PO number text.
+  poMonth         String?
 
   manufacturerId  String
   manufacturer    Manufacturer @relation(fields: [manufacturerId], references: [id])

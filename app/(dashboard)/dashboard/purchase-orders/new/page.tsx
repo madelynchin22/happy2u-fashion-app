@@ -5,6 +5,8 @@ import { Search, Camera, ShoppingCart, ChevronDown, ChevronUp } from "lucide-rea
 import Image from "next/image";
 
 function today() { return new Date().toISOString().split("T")[0]; }
+function currentMonth() { return new Date().toISOString().slice(0, 7); }
+const CURRENT_YEAR = new Date().getFullYear();
 
 type LibItem = {
   id: string; libNumber: string; productName: string; h2uSku?: string; mainSku?: string;
@@ -42,7 +44,8 @@ export default function NewPOPage() {
   const router = useRouter();
   const [library, setLibrary] = useState<LibItem[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [date, setDate] = useState(today());
+  const [poSuffix, setPoSuffix] = useState("");
+  const [poMonth, setPoMonth] = useState(currentMonth());
   const [notes, setNotes] = useState("");
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
@@ -151,12 +154,25 @@ export default function NewPOPage() {
   async function save() {
     if (selected.size === 0) { alert("Select at least one product."); return; }
 
+    if (!poSuffix.trim()) { alert("Enter a PO Number, e.g. MAY03."); return; }
+
     // Block if any selected group has no manufacturer (required field in PO)
     const noMfr = selectedSkuGroups.filter(g => !g.mfrId);
     if (noMfr.length > 0) {
       alert(
         `The following items have no manufacturer set — please assign one in Product Library first:\n` +
         noMfr.map(g => `• ${g.mainSku ?? g.productName}`).join("\n")
+      );
+      return;
+    }
+
+    // One PO Number can only be applied to one PO — narrow selection to a single
+    // manufacturer if colours from more than one manufacturer are selected.
+    if (selectedSkuGroups.length > 1) {
+      alert(
+        `PO Number ${finalPoNumber} can only be used for one purchase order, but the current ` +
+        `selection would create ${selectedSkuGroups.length} POs (one per manufacturer). ` +
+        `Select colours from a single manufacturer, or create them separately.`
       );
       return;
     }
@@ -172,7 +188,8 @@ export default function NewPOPage() {
           productName:    group.mainSku ?? group.productName,
           brand:          group.brand,
           sampleOrderId:  group.items[0].sampleOrder?.orderNumber ?? null,
-          date:           date || today(),
+          poNumber:       finalPoNumber,
+          poMonth,
           notes:          notes || null,
           items: group.items.map(item => ({
             h2uSku:          item.h2uSku          ?? null,
@@ -205,6 +222,7 @@ export default function NewPOPage() {
   }
 
   const poCount = selectedSkuGroups.length;
+  const finalPoNumber = `PO-${CURRENT_YEAR}-${poSuffix.trim().toUpperCase()}`;
 
   return (
     <div className="space-y-6">
@@ -212,7 +230,6 @@ export default function NewPOPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">New Purchase Order</h1>
-          <p className="text-sm text-gray-500">PO numbers are auto-assigned per manufacturer on save</p>
         </div>
         <div className="flex gap-3">
           <button onClick={() => router.back()} className="btn-secondary">Cancel</button>
@@ -226,10 +243,25 @@ export default function NewPOPage() {
       {/* PO Details */}
       <div className="card p-6">
         <h2 className="font-semibold text-gray-900 mb-4">PO Details</h2>
-        <div className="grid grid-cols-2 gap-4 max-w-xl">
+        <div className="grid grid-cols-3 gap-4 max-w-3xl">
           <div>
-            <label className="label">Purchase Date</label>
-            <input type="date" className="input" value={date} onChange={e => setDate(e.target.value)} />
+            <label className="label">PO Number</label>
+            <div className="flex items-center rounded-lg border border-gray-200 overflow-hidden focus-within:ring-1 focus-within:ring-brand-400">
+              <span className="px-3 py-2 text-sm text-gray-400 bg-gray-50 border-r border-gray-200 whitespace-nowrap">
+                PO-{CURRENT_YEAR}-
+              </span>
+              <input className="flex-1 min-w-0 px-2 py-2 text-sm outline-none"
+                value={poSuffix}
+                onChange={e => setPoSuffix(e.target.value)}
+                placeholder="e.g. MAY03" />
+            </div>
+            {poSuffix.trim() && (
+              <p className="text-xs text-gray-400 mt-1">Will be created as <span className="font-mono font-medium text-gray-600">{finalPoNumber}</span></p>
+            )}
+          </div>
+          <div>
+            <label className="label">Month</label>
+            <input type="month" className="input" value={poMonth} onChange={e => setPoMonth(e.target.value)} />
           </div>
           <div>
             <label className="label">Notes</label>

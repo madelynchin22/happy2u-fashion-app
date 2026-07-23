@@ -108,20 +108,30 @@ export async function POST(req: NextRequest) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { items, date, deliveryDate, ...poData } = await req.json();
+    const { items, date, deliveryDate, poNumber: customPoNumber, poMonth, ...poData } = await req.json();
 
     // Resolve user ID by email to avoid stale JWT issues after DB resets
     const dbUser = await prisma.user.findUnique({ where: { email: session.user!.email! } });
     const createdById = dbUser?.id ?? null;
 
-    // Auto-generate PO number: PO-2026-MAY01 (sequential within the month)
-    const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-    const refDate = date ? new Date(date) : new Date();
-    const year = refDate.getFullYear();
-    const monthAbbr = MONTHS[refDate.getMonth()];
-    const prefix = `PO-${year}-${monthAbbr}`;
-    const monthCount = await prisma.purchaseOrder.count({ where: { poNumber: { startsWith: prefix } } });
-    const poNumber = `${prefix}${String(monthCount + 1).padStart(2, "0")}`;
+    let poNumber: string;
+    if (customPoNumber) {
+      // Caller (New PO page) supplies the full number directly — e.g. "PO-2026-MAY03".
+      const exists = await prisma.purchaseOrder.findUnique({ where: { poNumber: customPoNumber } });
+      if (exists) {
+        return NextResponse.json({ error: `PO number ${customPoNumber} already exists — pick a different one.` }, { status: 400 });
+      }
+      poNumber = customPoNumber;
+    } else {
+      // Auto-generate PO number: PO-2026-MAY01 (sequential within the month)
+      const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+      const refDate = date ? new Date(date) : new Date();
+      const year = refDate.getFullYear();
+      const monthAbbr = MONTHS[refDate.getMonth()];
+      const prefix = `PO-${year}-${monthAbbr}`;
+      const monthCount = await prisma.purchaseOrder.count({ where: { poNumber: { startsWith: prefix } } });
+      poNumber = `${prefix}${String(monthCount + 1).padStart(2, "0")}`;
+    }
 
     // Sanitize items — only keep known fields
     const cleanItems = (items ?? []).map((item: any) => ({
@@ -157,6 +167,7 @@ export async function POST(req: NextRequest) {
     const po = await prisma.purchaseOrder.create({
       data: {
         poNumber,
+        poMonth:         poMonth ?? null,
         brand:           poData.brand           ?? "Happy2U",
         productName:     poData.productName      ?? null,
         manufacturerId:  poData.manufacturerId,

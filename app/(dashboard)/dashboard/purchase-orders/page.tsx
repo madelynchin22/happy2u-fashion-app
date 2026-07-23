@@ -13,7 +13,7 @@ type Allocation = { name: string; pairs: number; pct: number; note?: string };
 type Outlet = { id: string; name: string; marking: string; country: string; isHQ: boolean };
 
 type PO = {
-  id: string; poNumber: string; brand: string; productName?: string; libProductName?: string;
+  id: string; poNumber: string; poMonth?: string | null; brand: string; productName?: string; libProductName?: string;
   status: string; poType?: string; photoUrl?: string;
   items?: { photoUrl?: string | null; h2uSku?: string | null; colorName?: string | null }[];
   sampleOrderId?: string; parentPoNumber?: string;
@@ -129,11 +129,13 @@ const MONTH_ABBR_TO_NUM: Record<string, string> = {
   JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12",
 };
 
-// The "PO month" is which tab a PO lives under — driven by its PO number (e.g.
-// "PO-2026-MAY01" → May), not the editable Purchase Date field. This lets a PO be
-// backdated (or postdated) for record-keeping without it jumping to a different tab.
-// Falls back to the Purchase Date only for numbers that don't follow that convention.
-function monthKey(poNumber?: string | null, dateFallback?: string | null): string {
+// The "PO month" is which tab a PO lives under — an explicit choice made once on
+// the New PO form (poMonth), not the editable Purchase Date field. This lets a PO
+// be backdated (or postdated) for record-keeping without it jumping to a different
+// tab. Falls back to parsing the PO number (for POs created before poMonth existed),
+// then to the Purchase Date as a last resort.
+function monthKey(poMonth?: string | null, poNumber?: string | null, dateFallback?: string | null): string {
+  if (poMonth) return poMonth;
   const m = poNumber?.match(/^PO-(\d{4})-([A-Za-z]{3})\d+$/);
   if (m) {
     const monthNum = MONTH_ABBR_TO_NUM[m[2].toUpperCase()];
@@ -1274,14 +1276,14 @@ function PurchaseOrdersContent() {
     }
     // Also include any months from actual PO data (e.g. older years)
     for (const p of pos) {
-      const k = monthKey(p.poNumber, p.date);
+      const k = monthKey(p.poMonth, p.poNumber, p.date);
       if (k !== "unknown") scaffolded.add(k);
     }
     return [...scaffolded].sort((a, b) => b.localeCompare(a));
   }, [pos]);
 
   const suppliersForMonth = useMemo(() => {
-    const pool = selectedMonth === "all" ? pos : pos.filter(p => monthKey(p.poNumber, p.date) === selectedMonth);
+    const pool = selectedMonth === "all" ? pos : pos.filter(p => monthKey(p.poMonth, p.poNumber, p.date) === selectedMonth);
     return [...new Set(pool.map(p => p.manufacturer.name))].sort();
   }, [pos, selectedMonth]);
 
@@ -1301,7 +1303,7 @@ function PurchaseOrdersContent() {
   }
 
   const filtered = pos.filter(p => {
-    if (selectedMonth !== "all" && monthKey(p.poNumber, p.date) !== selectedMonth) return false;
+    if (selectedMonth !== "all" && monthKey(p.poMonth, p.poNumber, p.date) !== selectedMonth) return false;
     if (selectedSupplier !== "all" && p.manufacturer.name !== selectedSupplier) return false;
     if (filter === "delayed") return (daysLate(p) ?? 0) > 0;
     if (filter === "in_production") {
@@ -1322,13 +1324,13 @@ function PurchaseOrdersContent() {
   type MonthGroup = { mk: string; ml: string; suppliers: SupGroup[] };
   const groupedPOs = useMemo<MonthGroup[]>(() => {
     const sorted = [...filtered].sort((a, b) => {
-      const mc = monthKey(b.poNumber, b.date).localeCompare(monthKey(a.poNumber, a.date));
+      const mc = monthKey(b.poMonth, b.poNumber, b.date).localeCompare(monthKey(a.poMonth, a.poNumber, a.date));
       if (mc !== 0) return mc;
       return (a.poNumber ?? "").localeCompare(b.poNumber ?? "");
     });
     const groups: MonthGroup[] = [];
     for (const po of sorted) {
-      const mk = monthKey(po.poNumber, po.date);
+      const mk = monthKey(po.poMonth, po.poNumber, po.date);
       let mGroup = groups.find(g => g.mk === mk);
       if (!mGroup) { mGroup = { mk, ml: monthLabel(mk), suppliers: [] }; groups.push(mGroup); }
       let sGroup = mGroup.suppliers.find(s => s.poNumber === po.poNumber);
