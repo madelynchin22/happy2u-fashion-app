@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, Fragment } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Camera, ShoppingCart } from "lucide-react";
+import { Search, Camera, ShoppingCart, ChevronDown, ChevronUp } from "lucide-react";
 import Image from "next/image";
 
 function today() { return new Date().toISOString().split("T")[0]; }
@@ -46,6 +46,7 @@ export default function NewPOPage() {
   const [notes, setNotes] = useState("");
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch("/api/product-library").then(r => r.json()).then(d => setLibrary(Array.isArray(d) ? d : []));
@@ -126,6 +127,15 @@ export default function NewPOPage() {
       const n = new Set(prev);
       if (allIn) items.forEach(i => n.delete(i.id));
       else items.forEach(i => n.add(i.id));
+      return n;
+    });
+  }
+
+  function toggleExpand(groupKey: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setExpandedGroups(prev => {
+      const n = new Set(prev);
+      n.has(groupKey) ? n.delete(groupKey) : n.add(groupKey);
       return n;
     });
   }
@@ -279,62 +289,108 @@ export default function NewPOPage() {
                               ?? items.find(i => i.photoSideUrl)?.photoSideUrl;
                   const mfrName = items[0].manufacturer?.name ?? "—";
 
+                  const isExpanded = expandedGroups.has(row.groupKey);
+
                   return (
-                    <tr key={row.groupKey}
-                      onClick={() => toggleGroup(items)}
-                      className={`cursor-pointer transition-colors border-b-2 ${
-                        allIn  ? "bg-teal-50 hover:bg-teal-100 border-teal-200" :
-                        someIn ? "bg-teal-50/50 hover:bg-teal-100/50 border-teal-100" :
-                                 "bg-gray-50 hover:bg-gray-100 border-gray-200"
-                      }`}>
-                      <td className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
-                        <GroupCheckbox allIn={allIn} someIn={someIn} onChange={() => toggleGroup(items)} />
-                      </td>
-                      <td className="px-4 py-3">
-                        {row.mainSku ? (
-                          <span className="font-mono text-sm font-black text-brand-700 bg-brand-50 px-2.5 py-1 rounded-lg border border-brand-200">
-                            {row.mainSku}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 font-semibold text-[11px] text-violet-600 bg-violet-100 px-2 py-0.5 rounded-lg border border-violet-300">
-                            Pending
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-2 py-2">
-                        {photo ? (
-                          <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-100 bg-gray-50 shrink-0">
-                            <Image src={photo} alt={items[0].productName} width={40} height={40}
-                              className="object-cover w-full h-full" />
-                          </div>
-                        ) : (
-                          <div className="w-10 h-10 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center shrink-0">
-                            <Camera size={12} className="text-gray-300" />
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="font-bold text-gray-900 leading-tight">{items[0].productName}</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5 capitalize">{items[0].category ?? "—"}</p>
-                        <div className="flex flex-wrap gap-2 mt-1.5">
-                          {items.map(it => (
-                            <span key={it.id} className="inline-flex items-center gap-1 text-[11px] text-gray-600">
-                              <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[it.status ?? ""] ?? "bg-gray-300"}`} />
-                              {it.colorName || "—"}
-                              {it.colorCode && <span className="font-mono text-gray-400">[{it.colorCode}]</span>}
+                    <Fragment key={row.groupKey}>
+                      <tr
+                        onClick={() => toggleGroup(items)}
+                        className={`cursor-pointer transition-colors border-b-2 ${
+                          allIn  ? "bg-teal-50 hover:bg-teal-100 border-teal-200" :
+                          someIn ? "bg-teal-50/50 hover:bg-teal-100/50 border-teal-100" :
+                                   "bg-gray-50 hover:bg-gray-100 border-gray-200"
+                        }`}>
+                        <td className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
+                          <GroupCheckbox allIn={allIn} someIn={someIn} onChange={() => toggleGroup(items)} />
+                        </td>
+                        <td className="px-4 py-3">
+                          {row.mainSku ? (
+                            <span className="font-mono text-sm font-black text-brand-700 bg-brand-50 px-2.5 py-1 rounded-lg border border-brand-200">
+                              {row.mainSku}
                             </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-xs font-medium">
-                        {items[0].manufacturer
-                          ? <span className="text-gray-600">{mfrName}</span>
-                          : <span className="text-red-500 font-semibold">⚠ No manufacturer</span>}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-gray-400">
-                        {items.length} colour{items.length !== 1 ? "s" : ""}
-                      </td>
-                    </tr>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 font-semibold text-[11px] text-violet-600 bg-violet-100 px-2 py-0.5 rounded-lg border border-violet-300">
+                              Pending
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2">
+                          {photo ? (
+                            <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-100 bg-gray-50 shrink-0">
+                              <Image src={photo} alt={items[0].productName} width={40} height={40}
+                                className="object-cover w-full h-full" />
+                            </div>
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center shrink-0">
+                              <Camera size={12} className="text-gray-300" />
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="font-bold text-gray-900 leading-tight">{items[0].productName}</p>
+                          <p className="text-[11px] text-gray-400 mt-0.5 capitalize">{items[0].category ?? "—"}</p>
+                          <div className="flex flex-wrap gap-2 mt-1.5">
+                            {items.map(it => (
+                              <span key={it.id} className="inline-flex items-center gap-1 text-[11px] text-gray-600">
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[it.status ?? ""] ?? "bg-gray-300"} ${selected.has(it.id) ? "ring-2 ring-teal-400" : ""}`} />
+                                {it.colorName || "—"}
+                                {it.colorCode && <span className="font-mono text-gray-400">[{it.colorCode}]</span>}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs font-medium">
+                          {items[0].manufacturer
+                            ? <span className="text-gray-600">{mfrName}</span>
+                            : <span className="text-red-500 font-semibold">⚠ No manufacturer</span>}
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          <button
+                            onClick={e => toggleExpand(row.groupKey, e)}
+                            className="inline-flex items-center gap-1 text-gray-500 hover:text-brand-700 font-medium transition-colors"
+                            title={isExpanded ? "Collapse colours" : "Pick specific colours"}>
+                            {items.length} colour{items.length !== 1 ? "s" : ""}
+                            {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        </td>
+                      </tr>
+
+                      {isExpanded && items.map(it => {
+                        const itSelected = selected.has(it.id);
+                        const itPhoto = it.shoePhotoUrl ?? it.photoSideUrl;
+                        return (
+                          <tr key={it.id} onClick={() => toggleItem(it.id)}
+                            className={`cursor-pointer transition-colors border-l-4 ${
+                              itSelected ? "bg-teal-50/60 hover:bg-teal-100/60 border-teal-300" : "bg-white hover:bg-gray-50 border-gray-100"
+                            }`}>
+                            <td className="pl-8 pr-4 py-2 w-10" onClick={e => e.stopPropagation()}>
+                              <input type="checkbox" checked={itSelected} onChange={() => toggleItem(it.id)}
+                                className="w-4 h-4 rounded accent-gray-800 cursor-pointer" />
+                            </td>
+                            <td className="px-4 py-2 text-[11px] text-gray-300 font-mono">{it.colorCode ?? "—"}</td>
+                            <td className="px-2 py-2">
+                              {itPhoto ? (
+                                <div className="w-8 h-8 rounded-lg overflow-hidden border border-gray-100 bg-gray-50 shrink-0">
+                                  <Image src={itPhoto} alt={it.colorName ?? ""} width={32} height={32} className="object-cover w-full h-full" />
+                                </div>
+                              ) : (
+                                <div className="w-8 h-8 rounded-lg border border-dashed border-gray-200 bg-gray-50 flex items-center justify-center shrink-0">
+                                  <Camera size={10} className="text-gray-300" />
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className="inline-flex items-center gap-1.5 text-sm text-gray-700">
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[it.status ?? ""] ?? "bg-gray-300"}`} />
+                                {it.colorName || "—"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-xs text-gray-400">—</td>
+                            <td className="px-4 py-2 text-xs text-gray-300">1 colour</td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
                   );
                 }
 
