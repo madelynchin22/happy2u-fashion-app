@@ -1084,49 +1084,65 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {draftItems.map((item, idx) => {
-                        const total = itemTotal(item);
-                        return (
-                          <tr key={idx} className={!item.included ? "opacity-40 bg-gray-50" : ""}>
-                            <td className="px-3 py-2 text-center">
-                              <input type="checkbox" checked={item.included}
-                                onChange={e => updateItem(idx, "included", e.target.checked)}
-                                className="w-4 h-4 rounded accent-gray-800 cursor-pointer" />
+                      {(() => {
+                        const colSpan = 4 + (outlets.length === 0 ? EDIT_SIZES.length : 0);
+                        // Same style-grouping as the outlet-allocation picker above, so a
+                        // colour's SKU context doesn't require re-reading it on every row.
+                        const skuGroups = new Map<string, { idx: number; item: DraftItem }[]>();
+                        draftItems.forEach((item, idx) => {
+                          const skuKey = item.h2uSku?.match(MAIN_SKU_RE_TL)?.[1]?.toUpperCase()
+                            ?? item.supplierSku ?? item.h2uSku ?? "Other";
+                          if (!skuGroups.has(skuKey)) skuGroups.set(skuKey, []);
+                          skuGroups.get(skuKey)!.push({ idx, item });
+                        });
+                        return [...skuGroups.entries()].flatMap(([skuKey, entries]) => [
+                          <tr key={`h-${skuKey}`} className="bg-gray-50/70">
+                            <td colSpan={colSpan} className="px-3 py-1 text-[10px] font-mono font-semibold text-gray-400 uppercase tracking-wide">
+                              {skuKey}
                             </td>
-                            <td className="px-3 py-2">
-                              <input
-                                className="text-sm border-b border-gray-200 focus:outline-none focus:border-brand-400 w-24 bg-transparent disabled:text-gray-400"
-                                value={item.colorName}
-                                disabled={!item.included}
-                                onChange={e => updateItem(idx, "colorName", e.target.value)} />
-                              {(item.h2uSku || item.supplierSku) && (
-                                <p className="text-[10px] text-gray-400 font-mono mt-0.5">{item.h2uSku || item.supplierSku}</p>
-                              )}
-                            </td>
-                            {outlets.length === 0 && EDIT_SIZES.map(sz => (
-                              <td key={sz} className="px-1 py-2">
-                                <input type="number" min="0"
-                                  className="w-12 text-center text-sm border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:opacity-30"
-                                  value={(item as any)[`qty${sz}`] || ""}
-                                  disabled={!item.included}
-                                  placeholder="0"
-                                  onChange={e => updateItem(idx, `qty${sz}`, Number(e.target.value) || 0)} />
-                              </td>
-                            ))}
-                            <td className="px-1 py-2">
-                              <input type="number" min="0"
-                                className="w-16 text-center text-sm border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:opacity-30"
-                                value={item.discountPrice || ""}
-                                disabled={!item.included}
-                                placeholder="¥"
-                                onChange={e => updateItem(idx, "discountPrice", Number(e.target.value) || 0)} />
-                            </td>
-                            <td className="px-3 py-2 text-center font-semibold text-gray-900">
-                              {total > 0 ? total : <span className="text-gray-300">0</span>}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                          </tr>,
+                          ...entries.map(({ idx, item }) => {
+                            const total = itemTotal(item);
+                            return (
+                              <tr key={idx} className={!item.included ? "opacity-40 bg-gray-50" : ""}>
+                                <td className="px-3 py-2 text-center">
+                                  <input type="checkbox" checked={item.included}
+                                    onChange={e => updateItem(idx, "included", e.target.checked)}
+                                    className="w-4 h-4 rounded accent-gray-800 cursor-pointer" />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    className="text-sm border-b border-gray-200 focus:outline-none focus:border-brand-400 w-24 bg-transparent disabled:text-gray-400"
+                                    value={item.colorName}
+                                    disabled={!item.included}
+                                    onChange={e => updateItem(idx, "colorName", e.target.value)} />
+                                </td>
+                                {outlets.length === 0 && EDIT_SIZES.map(sz => (
+                                  <td key={sz} className="px-1 py-2">
+                                    <input type="number" min="0"
+                                      className="w-12 text-center text-sm border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:opacity-30"
+                                      value={(item as any)[`qty${sz}`] || ""}
+                                      disabled={!item.included}
+                                      placeholder="0"
+                                      onChange={e => updateItem(idx, `qty${sz}`, Number(e.target.value) || 0)} />
+                                  </td>
+                                ))}
+                                <td className="px-1 py-2">
+                                  <input type="number" min="0"
+                                    className="w-16 text-center text-sm border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:opacity-30"
+                                    value={item.discountPrice || ""}
+                                    disabled={!item.included}
+                                    placeholder="¥"
+                                    onChange={e => updateItem(idx, "discountPrice", Number(e.target.value) || 0)} />
+                                </td>
+                                <td className="px-3 py-2 text-center font-semibold text-gray-900">
+                                  {total > 0 ? total : <span className="text-gray-300">0</span>}
+                                </td>
+                              </tr>
+                            );
+                          }),
+                        ]);
+                      })()}
                     </tbody>
                   </table>
                 </div>
