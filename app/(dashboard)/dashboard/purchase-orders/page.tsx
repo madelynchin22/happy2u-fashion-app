@@ -968,23 +968,43 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
                         <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Outlet allocation</p>
                         <p className="text-xs text-gray-400">Quantities per outlet per size — totals auto-fill the matrix below</p>
                       </div>
-                      <div className="flex gap-1 flex-wrap">
-                        {draftItems.map((item, idx) => {
-                          if (!item.included) return null;
-                          const colTotal = itemTotal(item);
-                          return (
-                            <button key={idx} type="button"
-                              onClick={() => setAllocColorIdx(idx)}
-                              className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                                allocColorIdx === idx
-                                  ? "bg-gray-900 text-white"
-                                  : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
-                              }`}>
-                              {itemLabel(item)}
-                              {colTotal > 0 && <span className="ml-1 opacity-60">({colTotal})</span>}
-                            </button>
-                          );
-                        })}
+                      <div className="space-y-2">
+                        {(() => {
+                          // Cluster colours under the style they belong to, so picking a
+                          // colour to allocate doesn't require scanning one long mixed row.
+                          const skuGroups = new Map<string, { idx: number; item: DraftItem }[]>();
+                          draftItems.forEach((item, idx) => {
+                            if (!item.included) return;
+                            const skuKey = item.h2uSku?.match(MAIN_SKU_RE_TL)?.[1]?.toUpperCase()
+                              ?? item.supplierSku ?? item.h2uSku ?? "Other";
+                            if (!skuGroups.has(skuKey)) skuGroups.set(skuKey, []);
+                            skuGroups.get(skuKey)!.push({ idx, item });
+                          });
+                          return [...skuGroups.entries()].map(([skuKey, entries]) => (
+                            <div key={skuKey} className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] font-mono font-semibold text-gray-400 uppercase tracking-wide w-16 shrink-0">
+                                {skuKey}
+                              </span>
+                              <div className="flex gap-1 flex-wrap">
+                                {entries.map(({ idx, item }) => {
+                                  const colTotal = itemTotal(item);
+                                  return (
+                                    <button key={idx} type="button"
+                                      onClick={() => setAllocColorIdx(idx)}
+                                      className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                                        allocColorIdx === idx
+                                          ? "bg-gray-900 text-white"
+                                          : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                      }`}>
+                                      {item.colorName || "—"}
+                                      {colTotal > 0 && <span className="ml-1 opacity-60">({colTotal})</span>}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ));
+                        })()}
                       </div>
                     </div>
 
