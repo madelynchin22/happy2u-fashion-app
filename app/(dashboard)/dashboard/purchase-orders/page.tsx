@@ -764,6 +764,16 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
     }
   }
 
+  async function closeOrder() {
+    await fetch(`/api/purchase-orders/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "closed" }),
+    });
+    const fresh = await fetch(`/api/purchase-orders/${id}`).then(r => r.json());
+    setPo(fresh);
+    onRefreshList?.();
+  }
+
   async function saveDraft() {
     setDraftSaving(true);
     const items = draftItems.filter(i => i.included).map(item => {
@@ -1311,6 +1321,14 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition-colors shadow-sm"
           >
             Submit order →
+          </button>
+        )}
+        {["shipped", "in_production"].includes(po.status) && (
+          <button
+            onClick={closeOrder}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+          >
+            Mark as done ✓
           </button>
         )}
       </div>
