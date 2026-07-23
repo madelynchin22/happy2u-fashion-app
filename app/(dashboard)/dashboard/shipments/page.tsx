@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
+import Link from "next/link";
 import { Plus, Plane, Ship, ArrowUpRight, AlertTriangle, X, ExternalLink } from "lucide-react";
 import { format, differenceInDays, addDays, isWithinInterval } from "date-fns";
 
@@ -10,7 +11,7 @@ type Shipment = {
   shipDate?: string; estimatedArrival?: string; actualArrival?: string;
   status: string; notes?: string;
   destination?: { name: string; marking: string; country: string; address?: string };
-  items: { totalPairs?: number; po: { poNumber: string; productName?: string; manufacturer?: { name: string } } }[];
+  items: { totalPairs?: number; po: { id: string; poNumber: string; productName?: string; manufacturer?: { name: string } } }[];
   events: ShipmentEvent[];
   _count: { events: number };
 };
@@ -297,18 +298,19 @@ export default function ShipmentsPage() {
                 const isSelected = selected?.id === s.id;
                 const batch  = isBatch(s);
                 const totalPairs = s.items.reduce((t, i) => t + (i.totalPairs ?? 0), 0);
-                const poNumbers  = s.items.map(i => i.po.poNumber);
                 const manufacturers = [...new Set(s.items.map(i => i.po.manufacturer?.name).filter(Boolean))];
                 return (
                   <tr key={s.id} onClick={() => setSelected(isSelected ? null : s)}
                     className={`cursor-pointer transition-colors ${isSelected ? "bg-gray-50" : "hover:bg-gray-50"}`}>
                     <td className="px-4 py-3.5">
-                      {poNumbers.length > 0 ? (
+                      {s.items.length > 0 ? (
                         <div className="flex flex-col gap-0.5">
-                          {poNumbers.map(pn => (
-                            <span key={pn} className="text-brand-600 text-xs font-medium flex items-center gap-0.5">
-                              {pn} <ArrowUpRight size={10} />
-                            </span>
+                          {s.items.map(item => (
+                            <Link key={item.po.id} href={`/dashboard/purchase-orders?open=${item.po.id}`}
+                              onClick={e => e.stopPropagation()}
+                              className="text-brand-600 text-xs font-medium flex items-center gap-0.5 hover:underline w-fit">
+                              {item.po.poNumber} <ArrowUpRight size={10} />
+                            </Link>
                           ))}
                         </div>
                       ) : "—"}
@@ -365,7 +367,6 @@ export default function ShipmentsPage() {
         const isLate = late != null && late > 0 && selected.status !== "delivered";
         const isCustoms = selected.status === "customs";
         const batch = isBatch(selected);
-        const selPoNumbers = selected.items.map(i => i.po.poNumber);
         const selLabel = batch ? batchLabel(selected) : (selected.items[0]?.po.productName ?? "Shipment");
         return (
           <div className="card p-5 space-y-5">
@@ -385,10 +386,14 @@ export default function ShipmentsPage() {
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-gray-500 mt-1">
-                  {selPoNumbers.length > 0 && (
-                    <span className="text-brand-600">{selPoNumbers.join(" · ")} ↗ · </span>
-                  )}
+                <p className="text-sm text-gray-500 mt-1 flex items-center flex-wrap gap-x-1">
+                  {selected.items.map(item => (
+                    <Link key={item.po.id} href={`/dashboard/purchase-orders?open=${item.po.id}`}
+                      className="text-brand-600 hover:underline">
+                      {item.po.poNumber}
+                    </Link>
+                  ))}
+                  {selected.items.length > 0 && " · "}
                   {selected.items.reduce((t, i) => t + (i.totalPairs ?? 0), 0)} pairs
                   {[...new Set(selected.items.map(i => i.po.manufacturer?.name).filter(Boolean))].map(n => ` · ${n}`)}
                 </p>
@@ -522,7 +527,11 @@ export default function ShipmentsPage() {
                   <tbody className="divide-y divide-gray-50">
                     {selected.items.map((item, i) => (
                       <tr key={i}>
-                        <td className="py-2.5 text-brand-600 text-xs font-medium">{item.po.poNumber}</td>
+                        <td className="py-2.5 text-xs font-medium">
+                          <Link href={`/dashboard/purchase-orders?open=${item.po.id}`} className="text-brand-600 hover:underline">
+                            {item.po.poNumber}
+                          </Link>
+                        </td>
                         <td className="py-2.5 text-gray-800">{item.po.productName ?? "—"}</td>
                         <td className="py-2.5 text-gray-700">{item.totalPairs ?? (item.po as any).totalPairs ?? "—"}</td>
                       </tr>

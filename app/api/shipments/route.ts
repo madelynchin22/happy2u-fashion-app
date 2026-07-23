@@ -22,7 +22,7 @@ export async function GET() {
         include: {
           po: {
             select: {
-              poNumber: true, productName: true, totalPairs: true,
+              id: true, poNumber: true, productName: true, totalPairs: true,
               manufacturer: { select: { name: true } },
             },
           },
