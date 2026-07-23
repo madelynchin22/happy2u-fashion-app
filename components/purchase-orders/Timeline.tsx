@@ -1,8 +1,16 @@
 "use client";
 import React from "react";
 import Image from "next/image";
+import { Trash2, Plus } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+export type ShipmentBatch = {
+  id: string;
+  pairs: number;
+  shipDate?: string | null;
+  arrivalDate?: string | null;
+};
 
 export type TimelinePO = {
   date: string;
@@ -14,6 +22,7 @@ export type TimelinePO = {
     colorName?: string;
     totalPairs: number;
     itemShipDate?: string | null;
+    shipmentBatches?: ShipmentBatch[];
   }[];
 };
 
@@ -31,16 +40,208 @@ export function fmtDate(d: Date): string {
 
 export const MAIN_SKU_RE_TL = /^(S\d{4})/i;
 
+type Stage = { label: string; done: boolean; actual: string | null; target: string | null };
+
+function StageBar({ stages, size }: { stages: Stage[]; size: "md" | "sm" }) {
+  const dot = size === "md" ? "w-5 h-5" : "w-3.5 h-3.5";
+  const check = size === "md" ? "w-2.5 h-2.5" : "w-2 h-2";
+  const labelCls = size === "md" ? "text-[10px] text-gray-500" : "text-[9px] text-gray-500";
+  const actualCls = size === "md" ? "text-[10px] text-gray-400" : "text-[8px] text-gray-400";
+  const targetCls = size === "md" ? "text-[9px] text-amber-500" : "text-[8px] text-amber-500";
+  return (
+    <div className="flex items-center gap-2">
+      {stages.map((stage, i, arr) => (
+        <React.Fragment key={i}>
+          <div className="flex flex-col items-center gap-1 flex-shrink-0">
+            <div className={`${dot} rounded-full border-2 flex items-center justify-center ${
+              stage.done ? "bg-green-500 border-green-500" : "bg-white border-gray-300"
+            }`}>
+              {stage.done && <svg className={check} fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round"/></svg>}
+            </div>
+            <p className={`${labelCls} whitespace-nowrap`}>{stage.label}</p>
+            {stage.actual && <p className={`${actualCls} whitespace-nowrap`}>{stage.actual}</p>}
+            {stage.target && <p className={`${targetCls} whitespace-nowrap`}>{stage.target}</p>}
+          </div>
+          {i < arr.length - 1 && (
+            <div className="flex-1 h-0.5 bg-gray-200 mb-5">
+              <div className="h-full bg-green-500 transition-all" style={{ width: arr[i].done ? "100%" : "0%" }} />
+            </div>
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function toInputDate(d?: string | null): string {
+  return d ? d.slice(0, 10) : "";
+}
+
+// ─── Per-line (SKU + colour) timeline & shipment batches ──────────────────────
+
+function ItemTimeline({ item, poSentDate, targetSupplierShip, onBatchAdd, onBatchUpdate, onBatchDelete }: {
+  item: TimelinePO["items"][0];
+  poSentDate: Date | null;
+  targetSupplierShip: Date | null;
+  onBatchAdd?: (itemId: string, initial: { pairs: number }) => Promise<void>;
+  onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
+  onBatchDelete?: (batchId: string) => Promise<void>;
+}) {
+  const [local, setLocal] = React.useState<Record<string, { pairs?: number; shipDate?: string; arrivalDate?: string }>>({});
+  const [saving, setSaving] = React.useState<Record<string, boolean>>({});
+  const [adding, setAdding] = React.useState(false);
+
+  const batches = item.shipmentBatches ?? [];
+
+  const val = (b: ShipmentBatch, field: "pairs" | "shipDate" | "arrivalDate") => {
+    const l = local[b.id];
+    if (l && field in l) return l[field] as any;
+    if (field === "pairs") return b.pairs;
+    return toInputDate(b[field]);
+  };
+
+  function setLocalField(batchId: string, field: "pairs" | "shipDate" | "arrivalDate", value: any) {
+    setLocal(prev => ({ ...prev, [batchId]: { ...prev[batchId], [field]: value } }));
+  }
+
+  async function commit(batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) {
+    setSaving(prev => ({ ...prev, [batchId]: true }));
+    if (onBatchUpdate) await onBatchUpdate(batchId, fields);
+    setSaving(prev => ({ ...prev, [batchId]: false }));
+  }
+
+  async function addBatch() {
+    const remaining = Math.max(0, item.totalPairs - batches.reduce((s, b) => s + b.pairs, 0));
+    setAdding(true);
+    if (onBatchAdd) await onBatchAdd(item.id, { pairs: remaining });
+    setAdding(false);
+  }
+
+  async function removeBatch(batchId: string) {
+    setSaving(prev => ({ ...prev, [batchId]: true }));
+    if (onBatchDelete) await onBatchDelete(batchId);
+  }
+
+  const effShipDate = (b: ShipmentBatch) => { const v = val(b, "shipDate"); return v ? new Date(v) : null; };
+  const effArrivalDate = (b: ShipmentBatch) => { const v = val(b, "arrivalDate"); return v ? new Date(v) : null; };
+  const effPairs = (b: ShipmentBatch) => Number(val(b, "pairs")) || 0;
+
+  const shippedPairs = batches.reduce((s, b) => s + (effShipDate(b) ? effPairs(b) : 0), 0);
+  const arrivedPairs = batches.reduce((s, b) => s + (effArrivalDate(b) ? effPairs(b) : 0), 0);
+
+  const pendingTargets = batches
+    .filter(b => effShipDate(b) && !effArrivalDate(b))
+    .map(b => addDays(effShipDate(b)!, 25));
+  const nextTargetArrival = pendingTargets.length > 0 ? pendingTargets.reduce((a, b) => (a < b ? a : b)) : null;
+
+  const fullyArrived = batches.length > 0 && arrivedPairs >= item.totalPairs;
+  const latestArrival = fullyArrived
+    ? batches.map(effArrivalDate).filter((d): d is Date => !!d).reduce((a, b) => (a > b ? a : b))
+    : null;
+
+  const targetLaunch = latestArrival
+    ? addDays(latestArrival, 3)
+    : (nextTargetArrival ? addDays(nextTargetArrival, 3) : null);
+
+  const stages: Stage[] = [
+    { label: "PO Submitted", done: !!poSentDate, actual: poSentDate ? fmtDate(poSentDate) : null, target: null },
+    { label: "Supplier Ship", done: shippedPairs > 0,
+      actual: shippedPairs > 0 ? `${shippedPairs}/${item.totalPairs} pairs` : null,
+      target: targetSupplierShip ? `Target ${fmtDate(targetSupplierShip)}` : null },
+    { label: "Actual Arrival", done: arrivedPairs > 0,
+      actual: arrivedPairs > 0 ? `${arrivedPairs}/${item.totalPairs} pairs` : null,
+      target: nextTargetArrival ? `Target ${fmtDate(nextTargetArrival)}` : null },
+    { label: "Targeted Launch", done: false, actual: null, target: targetLaunch ? fmtDate(targetLaunch) : null },
+  ];
+
+  return (
+    <div className="pl-8 pr-4 py-2.5 border-b border-gray-50">
+      <div className="flex items-center gap-3 mb-2">
+        {item.photoUrl ? (
+          <Image src={item.photoUrl} alt={item.colorName ?? ""} width={28} height={28} className="w-7 h-7 rounded-md object-cover border border-gray-100 flex-shrink-0" />
+        ) : (
+          <div className="w-7 h-7 rounded-md bg-gray-50 border border-dashed border-gray-200 flex-shrink-0" />
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</p>
+          <p className="text-[10px] text-gray-400">{item.totalPairs} pairs ordered</p>
+        </div>
+      </div>
+
+      <div className="mb-2.5 pl-1">
+        <StageBar stages={stages} size="sm" />
+      </div>
+
+      <div className="bg-gray-50 rounded-lg p-2.5 space-y-2">
+        {batches.length === 0 && (
+          <p className="text-[10px] text-gray-400">No shipments recorded yet.</p>
+        )}
+        {batches.map(b => {
+          const target = effShipDate(b) ? addDays(effShipDate(b)!, 25) : null;
+          return (
+            <div key={b.id} className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                <input
+                  type="number" min={0}
+                  value={val(b, "pairs")}
+                  onChange={e => setLocalField(b.id, "pairs", e.target.value === "" ? "" : Number(e.target.value))}
+                  onBlur={e => commit(b.id, { pairs: Number(e.target.value) || 0 })}
+                  className="w-16 text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-400"
+                />
+                <span className="text-[10px] text-gray-400">pairs</span>
+              </div>
+              <div className="flex flex-col">
+                <input
+                  type="date"
+                  value={val(b, "shipDate")}
+                  onChange={e => { const v = e.target.value || null; setLocalField(b.id, "shipDate", v ?? ""); commit(b.id, { shipDate: v }); }}
+                  className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-400 w-28"
+                />
+                <span className="text-[9px] text-gray-400">ship date</span>
+              </div>
+              <div className="flex flex-col">
+                <input
+                  type="date"
+                  value={val(b, "arrivalDate")}
+                  onChange={e => { const v = e.target.value || null; setLocalField(b.id, "arrivalDate", v ?? ""); commit(b.id, { arrivalDate: v }); }}
+                  className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-400 w-28"
+                />
+                <span className="text-[9px] text-gray-400">
+                  {target ? `arrival · target ${fmtDate(target)}` : "actual arrival"}
+                </span>
+              </div>
+              {saving[b.id] && <span className="text-[9px] text-gray-400">Saving…</span>}
+              <button
+                onClick={() => removeBatch(b.id)}
+                className="ml-auto text-gray-300 hover:text-red-500 transition-colors"
+                title="Remove this shipment"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          );
+        })}
+        <button
+          onClick={addBatch}
+          disabled={adding}
+          className="flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 transition-colors disabled:opacity-50"
+        >
+          <Plus size={12} /> {adding ? "Adding…" : "Add shipment"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Timeline ─────────────────────────────────────────────────────────────────
 
-export function Timeline<TPO extends TimelinePO>({ po, onSave, onItemShipSave }: {
+export function Timeline<TPO extends TimelinePO>({ po, onSave, onBatchAdd, onBatchUpdate, onBatchDelete }: {
   po: TPO;
   onSave?: (field: "shipDate" | "deliveryDate", value: string) => void;
-  onItemShipSave?: (itemIds: string[], date: string | null) => Promise<void>;
+  onBatchAdd?: (itemId: string, initial: { pairs: number }) => Promise<void>;
+  onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
+  onBatchDelete?: (batchId: string) => Promise<void>;
 }) {
-  const [localDates, setLocalDates] = React.useState<Record<string, string>>({});
-  const [saving, setSaving] = React.useState<Record<string, boolean>>({});
-
   const now          = new Date();
   const poSentDate   = po.date         ? new Date(po.date)         : null;
   const arriveActual = po.deliveryDate ? new Date(po.deliveryDate) : null;
@@ -70,20 +271,23 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onItemShipSave }:
   }
   const skuGroups = [...skuMap.values()];
 
-  // Effective date for a single item: local optimistic first, then saved DB value
-  const itemDate = (item: SkuItem): string =>
-    localDates[item.id] !== undefined
-      ? localDates[item.id]
-      : item.itemShipDate ? (item.itemShipDate as string).slice(0, 10) : "";
-
-  // A group counts as "shipped" once at least one colour variant has a date
+  // A colour counts as "shipped" once at least one shipment batch has been recorded
   const totalGroups   = skuGroups.length;
-  const shippedGroups = skuGroups.filter(g => g.items.some(i => itemDate(i) !== "")).length;
-  const allShipped    = totalGroups > 0 && shippedGroups === totalGroups;
+  const shippedGroups = skuGroups.filter(g => g.items.some(i => (i.shipmentBatches?.length ?? 0) > 0)).length;
 
   const daysToArrive = (arriveActual ?? targetArrival)
     ? Math.ceil(((arriveActual ?? targetArrival)!.getTime() - now.getTime()) / 86400000)
     : null;
+
+  const overallStages: Stage[] = [
+    { label: "PO Submitted", done: !!poSentDate, actual: poSentDate ? fmtDate(poSentDate) : null, target: null },
+    { label: "Supplier Ship", done: !!earliestShip, actual: earliestShip ? fmtDate(earliestShip) : null,
+      target: targetSupplierShip ? `Target ${fmtDate(targetSupplierShip)}` : null },
+    { label: "Actual Arrival", done: !!arriveActual, actual: arriveActual ? fmtDate(arriveActual) : null,
+      target: targetArrival ? `Target ${fmtDate(targetArrival)}` : null },
+    { label: "Targeted Launch", done: false, actual: null,
+      target: targetLaunch ? fmtDate(targetLaunch) : null },
+  ];
 
   return (
     <div className="space-y-4">
@@ -97,39 +301,9 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onItemShipSave }:
       </div>
 
       {/* Overall 4-stage bar */}
-      <div>
-        <div className="flex items-center gap-2 mb-1.5">
-          {[
-            { label: "PO Submitted", done: !!poSentDate, actual: poSentDate ? fmtDate(poSentDate) : null, target: null },
-            { label: "Supplier Ship", done: !!earliestShip, actual: earliestShip ? fmtDate(earliestShip) : null,
-              target: targetSupplierShip ? `Target ${fmtDate(targetSupplierShip)}` : null },
-            { label: "Actual Arrival", done: !!arriveActual, actual: arriveActual ? fmtDate(arriveActual) : null,
-              target: targetArrival ? `Target ${fmtDate(targetArrival)}` : null },
-            { label: "Targeted Launch", done: false, actual: null,
-              target: targetLaunch ? fmtDate(targetLaunch) : null },
-          ].map((stage, i, arr) => (
-            <React.Fragment key={i}>
-              <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                  stage.done ? "bg-green-500 border-green-500" : "bg-white border-gray-300"
-                }`}>
-                  {stage.done && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>}
-                </div>
-                <p className="text-[10px] text-gray-500 whitespace-nowrap">{stage.label}</p>
-                {stage.actual && <p className="text-[10px] text-gray-400">{stage.actual}</p>}
-                {stage.target && <p className="text-[9px] text-amber-500 whitespace-nowrap">{stage.target}</p>}
-              </div>
-              {i < arr.length - 1 && (
-                <div className="flex-1 h-0.5 bg-gray-200 mb-5">
-                  <div className="h-full bg-green-500 transition-all" style={{ width: arr[i].done ? "100%" : "0%" }} />
-                </div>
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-      </div>
+      <StageBar stages={overallStages} size="md" />
 
-      {/* Per-SKU ship tracking */}
+      {/* Per-SKU, per-colour shipment tracking */}
       {skuGroups.length > 0 && (
         <div className="border border-gray-200 rounded-xl">
           <div className="bg-gray-50 px-4 py-2 border-b border-gray-100 rounded-t-xl flex items-center justify-between">
@@ -138,7 +312,7 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onItemShipSave }:
           </div>
           <div className="divide-y divide-gray-100">
             {skuGroups.map(grp => {
-              const shippedInGroup = grp.items.filter(i => (localDates[i.id] ?? (i.itemShipDate ? i.itemShipDate.slice(0,10) : "")) !== "").length;
+              const shippedInGroup = grp.items.filter(i => (i.shipmentBatches?.length ?? 0) > 0).length;
               return (
                 <div key={grp.key}>
                   {/* Main SKU group header */}
@@ -153,49 +327,18 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onItemShipSave }:
                       {shippedInGroup}/{grp.items.length} shipped
                     </span>
                   </div>
-                  {/* Per-colour rows */}
-                  {grp.items.map(item => {
-                    const itemKey = item.id;
-                    const dateVal = localDates[itemKey] ?? (item.itemShipDate ? (item.itemShipDate as string).slice(0, 10) : "");
-                    const isShipped = dateVal !== "";
-                    const isSaving  = saving[itemKey];
-                    return (
-                      <div key={itemKey} className={`flex items-center gap-3 pl-8 pr-4 py-2 border-b border-gray-50 transition-colors ${isShipped ? "bg-green-50/30" : ""}`}>
-                        {item.photoUrl ? (
-                          <Image src={item.photoUrl} alt={item.colorName ?? ""} width={28} height={28} className="w-7 h-7 rounded-md object-cover border border-gray-100 flex-shrink-0" />
-                        ) : (
-                          <div className="w-7 h-7 rounded-md bg-gray-50 border border-dashed border-gray-200 flex-shrink-0" />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <p className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</p>
-                          </div>
-                          <p className="text-[10px] text-gray-400">{item.totalPairs} pairs</p>
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          {isShipped ? (
-                            <span className="text-[10px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-                              {isSaving ? "Saving…" : `Shipped ${fmtDate(new Date(dateVal))}`}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-gray-400">{isSaving ? "Saving…" : "Pending"}</span>
-                          )}
-                          <input
-                            type="date"
-                            value={dateVal}
-                            onChange={async e => {
-                              const val = e.target.value || null;
-                              setLocalDates(prev => ({ ...prev, [itemKey]: val ?? "" }));
-                              setSaving(prev => ({ ...prev, [itemKey]: true }));
-                              if (onItemShipSave) await onItemShipSave([item.id], val);
-                              setSaving(prev => ({ ...prev, [itemKey]: false }));
-                            }}
-                            className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-400 w-28"
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {/* Per-colour rows — each with its own full timeline + batches */}
+                  {grp.items.map(item => (
+                    <ItemTimeline
+                      key={item.id}
+                      item={item}
+                      poSentDate={poSentDate}
+                      targetSupplierShip={targetSupplierShip}
+                      onBatchAdd={onBatchAdd}
+                      onBatchUpdate={onBatchUpdate}
+                      onBatchDelete={onBatchDelete}
+                    />
+                  ))}
                 </div>
               );
             })}

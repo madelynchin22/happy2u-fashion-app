@@ -52,6 +52,7 @@ type PODetail = Omit<PO, "items"> & {
     totalPairs: number; discountPrice?: number; lineTotal?: number;
     outletAllocations?: string | null;
     itemShipDate?: string | null;
+    shipmentBatches?: { id: string; pairs: number; shipDate?: string | null; arrivalDate?: string | null }[];
     receivedQty?: number | null; defectQty?: number | null;
     receiptNotes?: string | null; receiptDate?: string | null;
   }[];
@@ -546,6 +547,36 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
     const fresh = await fetch(`/api/purchase-orders/${id}`).then(r => r.json());
     setPo(fresh);
     onRefreshList?.();
+  }
+
+  async function refreshAfterBatchChange() {
+    const fresh = await fetch(`/api/purchase-orders/${id}`).then(r => r.json());
+    if (fresh?.id) { setPo(fresh); onRefreshList?.(); }
+  }
+
+  async function addShipmentBatch(itemId: string, initial: { pairs: number }) {
+    await fetch(`/api/po-items/${itemId}/batches`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(initial),
+    });
+    await refreshAfterBatchChange();
+  }
+
+  async function updateShipmentBatch(batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) {
+    const item = po?.items.find(i => i.shipmentBatches?.some(b => b.id === batchId));
+    if (!item) return;
+    await fetch(`/api/po-items/${item.id}/batches/${batchId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    await refreshAfterBatchChange();
+  }
+
+  async function deleteShipmentBatch(batchId: string) {
+    const item = po?.items.find(i => i.shipmentBatches?.some(b => b.id === batchId));
+    if (!item) return;
+    await fetch(`/api/po-items/${item.id}/batches/${batchId}`, { method: "DELETE" });
+    await refreshAfterBatchChange();
   }
 
   async function submitOrder() {
@@ -1102,20 +1133,10 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
 
         {/* Production timeline */}
         <div className="border border-gray-100 rounded-xl p-5">
-          <Timeline po={po} onSave={saveDateField} onItemShipSave={async (itemIds, date) => {
-            const res = await fetch(`/api/purchase-orders/${po.id}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ shipItems: itemIds.map(itemId => ({ id: itemId, itemShipDate: date })) }),
-            });
-            if (!res.ok) {
-              const errBody = await res.json().catch(() => ({}));
-              console.error("[shipItems save] PATCH failed", res.status, errBody);
-              return;
-            }
-            const fresh = await fetch(`/api/purchase-orders/${po.id}`).then(r => r.json());
-            if (fresh?.id) { setPo(fresh); onRefreshList?.(); }
-          }} />
+          <Timeline po={po} onSave={saveDateField}
+            onBatchAdd={addShipmentBatch}
+            onBatchUpdate={updateShipmentBatch}
+            onBatchDelete={deleteShipmentBatch} />
         </div>
 
       </div>

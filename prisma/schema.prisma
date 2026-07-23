@@ -333,7 +333,8 @@ model PurchaseOrderItem {
 
   outletAllocations String?  // JSON: [{outletId, qty36-42}] per-outlet size breakdown
 
-  // Actual ship-out date from manufacturer (per item, independent of PO-level shipDate)
+  // Earliest shipmentBatches.shipDate, kept in sync automatically — cheap "has this
+  // colour started shipping" gate for payment-tracking / outlet-receipt eligibility.
   itemShipDate    DateTime?
 
   // Goods receipt
@@ -344,6 +345,25 @@ model PurchaseOrderItem {
 
   packingListItems PackingListItem[]
   deliveryItems    DeliveryItem[]
+  shipmentBatches  ItemShipmentBatch[]
+}
+
+// A single partial shipment of one PO colour line — a supplier can ship the same
+// SKU+colour in several batches (different date, different pairs each time), and
+// each batch arrives and gets picked up separately.
+model ItemShipmentBatch {
+  id          String   @id @default(cuid())
+  poItemId    String
+  poItem      PurchaseOrderItem @relation(fields: [poItemId], references: [id], onDelete: Cascade)
+
+  pairs       Int      @default(0)
+  shipDate    DateTime?
+  arrivalDate DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([poItemId])
 }
 
 // ─── PACKING LIST ─────────────────────────────────────────────────────────────

@@ -136,13 +136,31 @@ export default function ShipmentsPage() {
     await refreshPoDetail(poDetail.id);
   }
 
-  async function saveItemShip(itemIds: string[], date: string | null) {
+  async function addShipmentBatch(itemId: string, initial: { pairs: number }) {
     if (!poDetail) return;
-    const res = await fetch(`/api/purchase-orders/${poDetail.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shipItems: itemIds.map(itemId => ({ id: itemId, itemShipDate: date })) }),
+    await fetch(`/api/po-items/${itemId}/batches`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(initial),
     });
-    if (!res.ok) { console.error("[shipItems save] PATCH failed", res.status); return; }
+    await refreshPoDetail(poDetail.id);
+  }
+
+  async function updateShipmentBatch(batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) {
+    if (!poDetail) return;
+    const item = poDetail.items.find(i => i.shipmentBatches?.some(b => b.id === batchId));
+    if (!item) return;
+    await fetch(`/api/po-items/${item.id}/batches/${batchId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    await refreshPoDetail(poDetail.id);
+  }
+
+  async function deleteShipmentBatch(batchId: string) {
+    if (!poDetail) return;
+    const item = poDetail.items.find(i => i.shipmentBatches?.some(b => b.id === batchId));
+    if (!item) return;
+    await fetch(`/api/po-items/${item.id}/batches/${batchId}`, { method: "DELETE" });
     await refreshPoDetail(poDetail.id);
   }
 
@@ -488,7 +506,10 @@ export default function ShipmentsPage() {
             {/* Timeline */}
             <div className="border border-gray-100 rounded-xl p-5">
               {poDetail ? (
-                <Timeline po={poDetail} onSave={saveDeliveryDate} onItemShipSave={saveItemShip} />
+                <Timeline po={poDetail} onSave={saveDeliveryDate}
+                  onBatchAdd={addShipmentBatch}
+                  onBatchUpdate={updateShipmentBatch}
+                  onBatchDelete={deleteShipmentBatch} />
               ) : (
                 <p className="text-xs text-gray-400">Loading timeline…</p>
               )}

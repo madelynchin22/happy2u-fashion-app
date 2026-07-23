@@ -11,7 +11,10 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     where: { id: (await params).id },
     include: {
       manufacturer: { select: { id: true, name: true, leadTimeDays: true, rating: true } },
-      items: { orderBy: { id: "asc" } },
+      items: {
+        orderBy: { id: "asc" },
+        include: { shipmentBatches: { orderBy: { shipDate: "asc" } } },
+      },
       collection: true,
       createdBy: { select: { name: true } },
       outletDeliveries: {
@@ -232,98 +235,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     data.totalPairs = cleanItems.reduce((s: number, i: any) => s + i.totalPairs, 0);
     data.totalPrice = cleanItems.reduce((s: number, i: any) => s + i.lineTotal,  0);
-  }
-
-  // Per-item ship-out date update (colour-level granularity)
-  if ("shipItems" in raw && Array.isArray(raw.shipItems)) {
-    for (const si of raw.shipItems) {
-      await prisma.purchaseOrderItem.update({
-        where: { id: si.id },
-        data: { itemShipDate: si.itemShipDate ? new Date(si.itemShipDate) : null },
-      });
-    }
-    // Sync PO-level shipDate and status based on how many items now have dates
-    const allItems = await prisma.purchaseOrderItem.findMany({
-      where: { poId: id },
-      select: { itemShipDate: true, outletAllocations: true },
-    });
-    const dates = allItems.map(i => i.itemShipDate).filter((d): d is Date => !!d);
-    const earliest = dates.length > 0 ? dates.reduce((a, b) => (a < b ? a : b)) : null;
-    data.shipDate = earliest;
-    if (!earliest) {
-      const cur = await prisma.purchaseOrder.findUnique({ where: { id }, select: { status: true } });
-      if (cur?.status === "shipped") data.status = "submitted";
-    } else if (dates.length === allItems.length) {
-      data.status = "shipped";
-    }
-
-    // Sync OutletDelivery statuses: in_transit only for outlets receiving shipped items
-    const shippedOutletIds = new Set<string>();
-    for (const item of allItems) {
-      if (!item.itemShipDate || !item.outletAllocations) continue;
-      try {
-        const allocs: { outletId: string }[] = JSON.parse(item.outletAllocations);
-        for (const a of allocs) { if (a.outletId) shippedOutletIds.add(a.outletId); }
-      } catch {}
-    }
-    // Create records for outlets receiving shipped items (if not yet created)
-    for (const outletId of shippedOutletIds) {
-      const exists = await prisma.outletDelivery.findUnique({ where: { poId_outletId: { poId: id, outletId } } });
-      if (!exists) {
-        await prisma.outletDelivery.create({ data: { poId: id, outletId, status: "in_transit" } });
-      } else if (exists.status === "pending") {
-        await prisma.outletDelivery.update({ where: { poId_outletId: { poId: id, outletId } }, data: { status: "in_transit" } });
-      }
-    }
-    // Revert outlets that no longer have any shipped items back to pending
-    const existingDeliveries = await prisma.outletDelivery.findMany({ where: { poId: id }, select: { outletId: true, status: true } });
-    for (const d of existingDeliveries) {
-      if (!shippedOutletIds.has(d.outletId) && d.status === "in_transit") {
-        await prisma.outletDelivery.update({ where: { poId_outletId: { poId: id, outletId: d.outletId } }, data: { status: "pending" } });
-      }
-    }
-
-    // ── Sync this PO's own shipment ─────────────────────────────────────────────
-    // One Shipment per PO (shipmentNumber = the PO's own number), not shared
-    // across POs by date. It exists only while at least one SKU has shipped —
-    // its shipDate tracks the earliest shipped colour, and its pairs track how
-    // many pairs have actually shipped so far (not the PO's full order total).
-    const itemsWithDates = await prisma.purchaseOrderItem.findMany({
-      where: { poId: id },
-      select: { itemShipDate: true, totalPairs: true },
-    });
-    const shipDates = itemsWithDates.map(i => i.itemShipDate).filter((d): d is Date => !!d);
-    const existingShipmentItem = await prisma.shipmentItem.findFirst({ where: { poId: id } });
-
-    if (shipDates.length === 0) {
-      // Nothing shipped (anymore) — remove this PO's shipment if one exists
-      if (existingShipmentItem) {
-        await prisma.shipmentItem.delete({ where: { id: existingShipmentItem.id } });
-        const remaining = await prisma.shipmentItem.count({ where: { shipmentId: existingShipmentItem.shipmentId } });
-        if (remaining === 0) await prisma.shipment.delete({ where: { id: existingShipmentItem.shipmentId } });
-      }
-    } else {
-      const shippedPairs = itemsWithDates
-        .filter(i => i.itemShipDate)
-        .reduce((s, i) => s + (i.totalPairs ?? 0), 0);
-      const earliestShipDate = shipDates.reduce((a, b) => (a < b ? a : b));
-
-      if (existingShipmentItem) {
-        await prisma.shipmentItem.update({ where: { id: existingShipmentItem.id }, data: { totalPairs: shippedPairs } });
-        await prisma.shipment.update({ where: { id: existingShipmentItem.shipmentId }, data: { shipDate: earliestShipDate } });
-      } else {
-        const poForShipment = await prisma.purchaseOrder.findUnique({ where: { id }, select: { poNumber: true } });
-        await prisma.shipment.create({
-          data: {
-            shipmentNumber: poForShipment?.poNumber ?? `SHIP-${id.slice(0, 8)}`,
-            shipDate: earliestShipDate,
-            status: "in_transit",
-            createdById: (session.user as any).id,
-            items: { create: [{ poId: id, totalPairs: shippedPairs }] },
-          },
-        });
-      }
-    }
   }
 
   // Receipt update: patch individual items' receivedQty / defectQty without replacing all items

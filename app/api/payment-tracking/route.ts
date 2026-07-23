@@ -27,22 +27,26 @@ export async function GET() {
       paymentIncoterm: true,
       manufacturer: { select: { id: true, name: true } },
       items: {
-        where: { itemShipDate: { not: null } },
         select: {
           h2uSku: true,
           colorName: true,
-          itemShipDate: true,
           lineTotal: true,
           totalPairs: true,
+          shipmentBatches: {
+            where: { shipDate: { not: null } },
+            select: { pairs: true, shipDate: true },
+            orderBy: { shipDate: "asc" },
+          },
         },
-        orderBy: { itemShipDate: "asc" },
       },
     },
     orderBy: { poNumber: "asc" },
   });
 
   const result = pos.map(({ items, ...po }) => {
-    // Group items by itemShipDate — each unique date is a separate payment batch
+    // Group shipment batches by date — each unique ship date is a separate payment
+    // batch, priced by the actual pairs shipped that day (not the item's full order
+    // qty), since a supplier can ship a colour across several partial shipments.
     const batchMap = new Map<string, {
       pairs: number;
       price: number;
@@ -50,13 +54,16 @@ export async function GET() {
     }>();
 
     for (const item of items) {
-      if (!item.itemShipDate) continue;
-      const key = item.itemShipDate.toISOString();
-      if (!batchMap.has(key)) batchMap.set(key, { pairs: 0, price: 0, skus: [] });
-      const b = batchMap.get(key)!;
-      b.pairs += item.totalPairs ?? 0;
-      b.price += item.lineTotal ?? 0;
-      b.skus.push({ h2uSku: item.h2uSku, colorName: item.colorName, pairs: item.totalPairs ?? 0 });
+      for (const batch of item.shipmentBatches) {
+        if (!batch.shipDate) continue;
+        const key = batch.shipDate.toISOString();
+        if (!batchMap.has(key)) batchMap.set(key, { pairs: 0, price: 0, skus: [] });
+        const b = batchMap.get(key)!;
+        const priceShare = item.totalPairs > 0 ? (item.lineTotal ?? 0) * (batch.pairs / item.totalPairs) : 0;
+        b.pairs += batch.pairs;
+        b.price += priceShare;
+        b.skus.push({ h2uSku: item.h2uSku, colorName: item.colorName, pairs: batch.pairs });
+      }
     }
 
     const batches = Array.from(batchMap.entries())
