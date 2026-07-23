@@ -91,7 +91,8 @@ export default function NewPOPage() {
     return rows;
   }, [filtered]);
 
-  // One PO group per unique (mainSku × manufacturer) — matches "Create PO" button in Product Library
+  // One PO per manufacturer — every selected colour/style from the same manufacturer
+  // goes onto one combined PO, as separate line items.
   const selectedSkuGroups = useMemo(() => {
     const map = new Map<string, {
       mfrId: string | null; mfrName: string;
@@ -99,20 +100,27 @@ export default function NewPOPage() {
     }>();
     for (const item of library) {
       if (!selected.has(item.id)) continue;
-      const mfrId  = item.manufacturer?.id ?? "__none__";
-      const skuPart = item.mainSku ?? item.sampleOrderId ?? item.id;
-      const key    = `${mfrId}::${skuPart}`;
+      const key = item.manufacturer?.id ?? "__none__";
       if (!map.has(key)) {
         map.set(key, {
           mfrId: item.manufacturer?.id ?? null,
           mfrName: item.manufacturer?.name ?? "No Manufacturer",
-          mainSku: item.mainSku ?? null,
+          mainSku: null,
           productName: item.productName,
           brand: item.brand ?? "Happy2U",
           items: [],
         });
       }
       map.get(key)!.items.push(item);
+    }
+    // Derive a combined product name/mainSku label from the distinct styles in each group
+    for (const group of map.values()) {
+      const distinctSkus = [...new Set(group.items.map(i => i.mainSku).filter(Boolean))] as string[];
+      group.mainSku = distinctSkus.length > 0 ? distinctSkus.join(", ") : null;
+      if (distinctSkus.length > 1) {
+        const distinctNames = [...new Set(group.items.map(i => i.productName))];
+        group.productName = distinctNames.length > 1 ? `${distinctNames.length} styles (${distinctSkus.join(", ")})` : distinctNames[0];
+      }
     }
     return [...map.values()];
   }, [library, selected]);
@@ -240,12 +248,16 @@ export default function NewPOPage() {
             {poCount} PO{poCount !== 1 ? "s" : ""} will be created
           </p>
           <div className="flex gap-2 flex-wrap">
-            {selectedSkuGroups.map((g, i) => (
-              <span key={i}
-                className="inline-flex items-center gap-1 text-xs bg-white border border-teal-200 text-teal-700 px-2.5 py-1 rounded-lg font-medium">
-                {g.mfrName} · {g.mainSku ?? g.productName} · {g.items.length} colour{g.items.length !== 1 ? "s" : ""}
-              </span>
-            ))}
+            {selectedSkuGroups.map((g, i) => {
+              const styleCount = new Set(g.items.map(it => it.mainSku ?? it.id)).size;
+              return (
+                <span key={i}
+                  className="inline-flex items-center gap-1 text-xs bg-white border border-teal-200 text-teal-700 px-2.5 py-1 rounded-lg font-medium">
+                  {g.mfrName} · {g.mainSku ?? g.productName} · {g.items.length} item{g.items.length !== 1 ? "s" : ""}
+                  {styleCount > 1 && ` (${styleCount} styles)`}
+                </span>
+              );
+            })}
           </div>
         </div>
       )}
