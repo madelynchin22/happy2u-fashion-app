@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { syncPoShipmentState } from "@/lib/po-shipment-sync";
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -311,6 +312,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
+  // Keep this PO's Shipment record (pending_ship_out / pending_arrival / completed)
+  // in sync with whatever changed above — status transitions, item quantities, etc.
+  await syncPoShipmentState(id, (session.user as any).id);
+
   return NextResponse.json(po);
   } catch (err: any) {
     const msg = err?.message ?? String(err);
@@ -325,7 +330,13 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
   const id = (await params).id;
 
   // Delete non-cascading relations first, then let DB cascade the rest
+  const shipmentItems = await prisma.shipmentItem.findMany({ where: { poId: id }, select: { shipmentId: true } });
+  const shipmentIds = [...new Set(shipmentItems.map(si => si.shipmentId))];
   await prisma.shipmentItem.deleteMany({ where: { poId: id } });
+  for (const shipmentId of shipmentIds) {
+    const remaining = await prisma.shipmentItem.count({ where: { shipmentId } });
+    if (remaining === 0) await prisma.shipment.delete({ where: { id: shipmentId } }).catch(() => {});
+  }
   await prisma.packingList.deleteMany({ where: { poId: id } });
   await prisma.deliveryItem.deleteMany({ where: { poItem: { poId: id } } });
 

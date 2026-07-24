@@ -423,7 +423,7 @@ model Shipment {
   actualArrival   DateTime?
   destinationId   String?
   destination     Outlet?  @relation(fields: [destinationId], references: [id])
-  status          String   @default("preparing") // preparing | in_transit | customs | arrived | delivered
+  status          String   @default("pending_ship_out") // pending_ship_out | pending_arrival | completed
   notes           String?
 
   createdById     String?

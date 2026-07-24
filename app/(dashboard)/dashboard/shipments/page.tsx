@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import { Plus, Plane, Ship, ArrowUpRight, AlertTriangle, X, ExternalLink } from "lucide-react";
-import { format, differenceInDays, addDays, isWithinInterval } from "date-fns";
+import { Plus, Plane, Ship, ArrowUpRight, AlertTriangle, X } from "lucide-react";
+import { format } from "date-fns";
 import { Timeline, TimelinePO } from "@/components/purchase-orders/Timeline";
 
 type ShipmentEvent = { id: string; eventType: string; eventDate: string; location?: string; notes?: string };
@@ -25,40 +25,19 @@ function detectMode(s: Shipment): "air" | "sea" {
   return "sea";
 }
 
-function daysLate(s: Shipment, now: Date): number | null {
-  if (!s.estimatedArrival) return null;
-  const eta = new Date(s.estimatedArrival);
-  if (s.status === "delivered" && s.actualArrival) {
-    return Math.round(differenceInDays(new Date(s.actualArrival), eta));
-  }
-  if (s.status !== "delivered") {
-    return differenceInDays(now, eta);
-  }
-  return null;
-}
-
-function isDelayed(s: Shipment, now: Date): boolean {
-  const late = daysLate(s, now);
-  return late != null && late > 0 && s.status !== "delivered";
-}
-
-function isArrivingThisWeek(s: Shipment, now: Date): boolean {
-  if (!s.estimatedArrival) return false;
-  if (!["in_transit","customs"].includes(s.status)) return false;
-  const eta = new Date(s.estimatedArrival);
-  return isWithinInterval(eta, { start: now, end: addDays(now, 7) });
-}
-
+// A shipment's status is derived entirely from its PO's shipment batches (see
+// lib/po-shipment-sync.ts), not set manually: pending_ship_out (submitted, no
+// colour has shipped yet), pending_arrival (something has shipped but not every
+// ordered pair has arrived), completed (every colour's full quantity arrived).
 const STATUS_PILL: Record<string, string> = {
-  preparing:  "bg-gray-100 text-gray-600",
-  in_transit: "bg-blue-100 text-blue-700",
-  customs:    "bg-amber-100 text-amber-700",
-  arrived:    "bg-teal-100 text-teal-700",
-  delivered:  "bg-green-100 text-green-700",
+  pending_ship_out: "bg-gray-100 text-gray-600",
+  pending_arrival:  "bg-blue-100 text-blue-700",
+  completed:        "bg-green-100 text-green-700",
 };
 const STATUS_LABEL: Record<string, string> = {
-  preparing:  "Awaiting pickup", in_transit: "In transit",
-  customs:    "Customs", arrived: "Arriving soon", delivered: "Delivered",
+  pending_ship_out: "Pending Ship Out",
+  pending_arrival:  "Pending Arrival",
+  completed:        "Completed",
 };
 
 function fmtDate(d?: string) {
@@ -92,7 +71,6 @@ export default function ShipmentsPage() {
   const [outlets, setOutlets]     = useState<{id:string;name:string;marking:string}[]>([]);
   const [pos, setPos]             = useState<{id:string;poNumber:string}[]>([]);
   const [saving, setSaving]       = useState(false);
-  const [now, setNow]             = useState(() => new Date());
   const [poDetail, setPoDetail]   = useState<TimelinePO & { id: string } | null>(null);
   const [form, setForm]           = useState({
     containerNumber:"", vesselName:"", blNumber:"", portOrigin:"", portDestination:"",
@@ -108,11 +86,9 @@ export default function ShipmentsPage() {
     fetch("/api/outlets").then(r => r.json()).then(setOutlets).catch(() => {});
     fetch("/api/purchase-orders").then(r => r.json()).then(setPos).catch(() => {});
 
-    // Tick every minute so days-late counters stay accurate
-    const tick = setInterval(() => setNow(new Date()), 60_000);
     // Refresh shipment data every 5 minutes
     const poll = setInterval(loadShipments, 300_000);
-    return () => { clearInterval(tick); clearInterval(poll); };
+    return () => clearInterval(poll);
   }, []);
 
   useEffect(() => {
@@ -164,24 +140,18 @@ export default function ShipmentsPage() {
     await refreshPoDetail(poDetail.id);
   }
 
-  const inTransit       = shipments.filter(s => s.status === "in_transit").length;
-  const awaitingPickup  = shipments.filter(s => s.status === "preparing").length;
-  const arrivingWeek    = shipments.filter(s => isArrivingThisWeek(s, now)).length;
-  const delayedList     = shipments.filter(s => isDelayed(s, now));
-  const deliveredOnTime = shipments.filter(s => s.status === "delivered" && (daysLate(s, now) ?? 0) <= 0).length;
-  const totalDelivered  = shipments.filter(s => s.status === "delivered").length;
-  const onTimeRate      = totalDelivered > 0 ? Math.round(deliveredOnTime / totalDelivered * 100) : 0;
+  const pendingShipOut = shipments.filter(s => s.status === "pending_ship_out").length;
+  const pendingArrival = shipments.filter(s => s.status === "pending_arrival").length;
+  const completed      = shipments.filter(s => s.status === "completed").length;
 
   const filtered = useMemo(() => shipments.filter(s => {
-    if (filter === "awaiting")  return s.status === "preparing";
-    if (filter === "in_transit") return s.status === "in_transit";
-    if (filter === "customs")   return s.status === "customs";
-    if (filter === "delivered") return s.status === "delivered";
-    if (filter === "delayed")   return isDelayed(s, now);
+    if (filter === "pending_ship_out") return s.status === "pending_ship_out";
+    if (filter === "pending_arrival")  return s.status === "pending_arrival";
+    if (filter === "completed")        return s.status === "completed";
     if (modeFilter === "air")   return detectMode(s) === "air";
     if (modeFilter === "sea")   return detectMode(s) === "sea";
     return true;
-  }), [shipments, filter, modeFilter, now]);
+  }), [shipments, filter, modeFilter]);
 
   // Group by the PO each shipment belongs to — each shipping-marked PO gets its own
   // shipment now, so this is what "grouped by PO number" naturally means here.
@@ -211,24 +181,7 @@ export default function ShipmentsPage() {
     }
   }
 
-  async function updateStatus(s: Shipment, status: string) {
-    const extra = status === "delivered" ? { actualArrival: new Date().toISOString() } : {};
-    await fetch(`/api/shipments/${s.id}`, {
-      method:"PATCH", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ status, ...extra }),
-    });
-    fetch("/api/shipments").then(r => r.json()).then(d => { setShipments(d); setSelected(d.find((x: Shipment) => x.id === s.id) ?? null); });
-  }
-
-  const STATUS_NEXT: Record<string, { status: string; label: string }[]> = {
-    preparing:  [{ status: "in_transit", label: "Mark in transit" }],
-    in_transit: [{ status: "customs",    label: "Mark at customs" }, { status: "arrived", label: "Mark arrived" }],
-    customs:    [{ status: "arrived",    label: "Mark arrived" }],
-    arrived:    [{ status: "delivered",  label: "Mark delivered" }],
-  };
-
   const selMode = selected ? detectMode(selected) : "sea";
-  const selLate = selected ? daysLate(selected, now) : null;
   const selTrack = selected ? trackingUrl(selected) : null;
 
   return (
@@ -238,9 +191,7 @@ export default function ShipmentsPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Shipments</h1>
           <p className="text-gray-500 text-sm mt-0.5">
-            {shipments.length} shipments · {inTransit} in transit
-            {delayedList.length > 0 && ` · ${delayedList.length} delayed`}
-            {arrivingWeek > 0 && ` · arriving this week: ${arrivingWeek}`}
+            {shipments.length} shipments · {pendingShipOut} pending ship out · {pendingArrival} pending arrival · {completed} completed
           </p>
         </div>
         <button onClick={() => setModal(true)}
@@ -250,52 +201,31 @@ export default function ShipmentsPage() {
       </div>
 
       {/* Status summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="card p-4">
-          <p className="text-xs text-gray-500 mb-1">Awaiting pickup</p>
-          <p className="text-3xl font-bold text-gray-900">{awaitingPickup}</p>
-          <p className="text-xs text-gray-400 mt-1">Ready at factory</p>
+          <p className="text-xs text-gray-500 mb-1">Pending Ship Out</p>
+          <p className="text-3xl font-bold text-gray-900">{pendingShipOut}</p>
+          <p className="text-xs text-gray-400 mt-1">Submitted, not shipped yet</p>
         </div>
         <div className="card p-4">
-          <p className="text-xs text-gray-500 mb-1">In transit</p>
-          <p className="text-3xl font-bold text-gray-900">{inTransit}</p>
-          <p className="text-xs text-gray-400 mt-1">
-            {shipments.filter(s => s.status === "in_transit" && detectMode(s) === "air").length} air ·{" "}
-            {shipments.filter(s => s.status === "in_transit" && detectMode(s) === "sea").length} sea
-          </p>
+          <p className="text-xs text-gray-500 mb-1">Pending Arrival</p>
+          <p className="text-3xl font-bold text-blue-600">{pendingArrival}</p>
+          <p className="text-xs text-gray-400 mt-1">Shipping, not fully arrived</p>
         </div>
         <div className="card p-4">
-          <p className="text-xs text-gray-500 mb-1">Arriving this week</p>
-          <p className="text-3xl font-bold text-gray-900">{arrivingWeek}</p>
-          <p className="text-xs text-gray-400 mt-1">Prep receiving</p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs text-gray-500 mb-1">Delayed</p>
-          <p className={`text-3xl font-bold ${delayedList.length > 0 ? "text-red-600" : "text-gray-900"}`}>
-            {delayedList.length}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            {delayedList.length > 0
-              ? `${delayedList[0].shipmentNumber} · ${daysLate(delayedList[0], now)} days`
-              : "All on schedule"}
-          </p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs text-gray-500 mb-1">On-time rate</p>
-          <p className="text-3xl font-bold text-gray-900">{totalDelivered > 0 ? `${onTimeRate}%` : "—"}</p>
-          <p className="text-xs text-gray-400 mt-1">Last 90 days</p>
+          <p className="text-xs text-gray-500 mb-1">Completed</p>
+          <p className="text-3xl font-bold text-green-600">{completed}</p>
+          <p className="text-xs text-gray-400 mt-1">Fully arrived</p>
         </div>
       </div>
 
       {/* Filter pills */}
       <div className="flex items-center gap-2 flex-wrap">
         {[
-          { key:"all",       label:"All" },
-          { key:"awaiting",  label:"Awaiting pickup" },
-          { key:"in_transit",label:"In transit" },
-          { key:"customs",   label:"Customs" },
-          { key:"delivered", label:"Delivered" },
-          { key:"delayed",   label:"Delayed" },
+          { key:"all",              label:"All" },
+          { key:"pending_ship_out", label:"Pending Ship Out" },
+          { key:"pending_arrival",  label:"Pending Arrival" },
+          { key:"completed",        label:"Completed" },
         ].map(f => (
           <button key={f.key} onClick={() => { setFilter(f.key); setModeFilter("all"); }}
             className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${
@@ -327,7 +257,7 @@ export default function ShipmentsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
-                {["LINKED PO","PRODUCT","MODE","CARRIER · TRACKING","SHIP DATE","ETA","STATUS","DAYS LATE"].map(h => (
+                {["LINKED PO","PRODUCT","MODE","CARRIER · TRACKING","SHIP DATE","ETA","STATUS"].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold tracking-widest text-gray-400 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -335,7 +265,7 @@ export default function ShipmentsPage() {
             <tbody className="divide-y divide-gray-50">
               {groupedShipments.flatMap(g => [
                 <tr key={`g-${g.key}`} className="bg-gray-900">
-                  <td colSpan={8} className="px-4 py-2">
+                  <td colSpan={7} className="px-4 py-2">
                     <div className="flex items-center gap-3">
                       {g.poId ? (
                         <Link href={`/dashboard/purchase-orders?open=${g.poId}`}
@@ -352,7 +282,6 @@ export default function ShipmentsPage() {
                   </td>
                 </tr>,
                 ...g.shipments.map(s => {
-                const late   = daysLate(s, now);
                 const mode   = detectMode(s);
                 const isSelected = selected?.id === s.id;
                 const batch  = isBatch(s);
@@ -400,12 +329,6 @@ export default function ShipmentsPage() {
                         {STATUS_LABEL[s.status] ?? s.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 whitespace-nowrap">
-                      {late == null ? "—"
-                        : late === 0 ? <span className="text-xs text-gray-500">on time</span>
-                        : late > 0   ? <span className="text-xs text-red-600 font-medium flex items-center gap-1">{late} days <AlertTriangle size={11} /></span>
-                        : <span className="text-xs text-green-600 font-medium">{Math.abs(late)} days early</span>}
-                    </td>
                   </tr>
                 );
                 }),
@@ -423,9 +346,6 @@ export default function ShipmentsPage() {
       )}
 
       {selected && (() => {
-        const late = selLate;
-        const isLate = late != null && late > 0 && selected.status !== "delivered";
-        const isCustoms = selected.status === "customs";
         const batch = isBatch(selected);
         const selLabel = batch ? batchLabel(selected) : (selected.items[0]?.po.productName ?? "Shipment");
         return (
@@ -435,16 +355,9 @@ export default function ShipmentsPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="font-bold text-gray-900 text-lg">{selected.shipmentNumber} · {selLabel}</h2>
-                  {isCustoms && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 flex items-center gap-1">
-                      <AlertTriangle size={10} /> Customs hold
-                    </span>
-                  )}
-                  {isLate && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                      {late} days late
-                    </span>
-                  )}
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_PILL[selected.status] ?? "bg-gray-100 text-gray-600"}`}>
+                    {STATUS_LABEL[selected.status] ?? selected.status}
+                  </span>
                 </div>
                 <p className="text-sm text-gray-500 mt-1 flex items-center flex-wrap gap-x-1">
                   {selected.items.map(item => (
@@ -465,12 +378,6 @@ export default function ShipmentsPage() {
                     Track with carrier <ArrowUpRight size={12} />
                   </a>
                 )}
-                {(STATUS_NEXT[selected.status] ?? []).map(n => (
-                  <button key={n.status} onClick={() => updateStatus(selected, n.status)}
-                    className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                    {n.label}
-                  </button>
-                ))}
               </div>
             </div>
 
@@ -493,9 +400,6 @@ export default function ShipmentsPage() {
               <div className="bg-gray-50 rounded-xl p-3">
                 <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-1">ETA</p>
                 <p className="text-sm font-medium text-gray-800">{fmtDate(selected.estimatedArrival)}</p>
-                {isLate && (
-                  <p className="text-xs text-red-600 mt-0.5">+{late} days delay</p>
-                )}
               </div>
               <div className="bg-gray-50 rounded-xl p-3">
                 <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-1">Ship date</p>
@@ -533,12 +437,6 @@ export default function ShipmentsPage() {
                     </div>
                   </div>
                 ))}
-              </div>
-            )}
-            {isCustoms && selected.events.length === 0 && (
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-red-50 border border-red-100">
-                <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
-                <p className="text-sm text-red-700">Shipment is currently held at customs. Add a shipment event to track progress.</p>
               </div>
             )}
 

@@ -4,14 +4,19 @@ import { prisma } from "@/lib/db";
 // itemShipDate (earliest batch ship date — the cheap "has this colour started
 // shipping" gate used by payment-tracking/outlet-receipt), the PO's own
 // shipDate/status, OutletDelivery statuses, and this PO's Shipment record
-// (shown on the Shipments page). Call after any batch create/update/delete.
+// (shown on the Shipments page). Call after any batch create/update/delete,
+// and after any PATCH that could change the PO's status or item quantities.
 export async function syncPoShipmentState(poId: string, createdById?: string | null) {
+  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, select: { status: true, poNumber: true } });
+  if (!po) return;
+
   const items = await prisma.purchaseOrderItem.findMany({
     where: { poId },
     select: {
       id: true,
+      totalPairs: true,
       outletAllocations: true,
-      shipmentBatches: { select: { pairs: true, shipDate: true } },
+      shipmentBatches: { select: { pairs: true, shipDate: true, arrivalDate: true } },
     },
   });
 
@@ -28,8 +33,7 @@ export async function syncPoShipmentState(poId: string, createdById?: string | n
 
   const poData: Record<string, any> = { shipDate: earliestOverall };
   if (!earliestOverall) {
-    const cur = await prisma.purchaseOrder.findUnique({ where: { id: poId }, select: { status: true } });
-    if (cur?.status === "shipped") poData.status = "submitted";
+    if (po.status === "shipped") poData.status = "submitted";
   } else if (everyItemHasBatch) {
     poData.status = "shipped";
   }
@@ -60,27 +64,46 @@ export async function syncPoShipmentState(poId: string, createdById?: string | n
   }
 
   // ── Sync this PO's own Shipment record ─────────────────────────────────────
-  // shippedPairs reflects pairs actually recorded across all batches — not the
-  // PO's full ordered total — since a supplier can ship a colour partially.
-  const shippedPairs = items.reduce((s, i) => s + i.shipmentBatches.reduce((bs, b) => bs + b.pairs, 0), 0);
+  // A Shipment tracks the whole submitted-PO lifecycle now, not just the part
+  // after shipping starts, so it can carry one of three statuses:
+  //  - pending_ship_out: submitted, but no colour has a recorded ship date yet
+  //  - pending_arrival:  at least one batch has shipped, but not every ordered
+  //                      pair (across every colour) has an arrival date yet
+  //  - completed:        every colour's full ordered quantity has arrived
+  // Drafts never get a Shipment — one is removed if a PO is reverted to draft.
   const existingShipmentItem = await prisma.shipmentItem.findFirst({ where: { poId } });
 
-  if (allDates.length === 0) {
+  if (po.status === "draft") {
     if (existingShipmentItem) {
       await prisma.shipmentItem.delete({ where: { id: existingShipmentItem.id } });
       const remaining = await prisma.shipmentItem.count({ where: { shipmentId: existingShipmentItem.shipmentId } });
       if (remaining === 0) await prisma.shipment.delete({ where: { id: existingShipmentItem.shipmentId } });
     }
-  } else if (existingShipmentItem) {
+    return;
+  }
+
+  // shippedPairs reflects pairs actually recorded across all batches — not the
+  // PO's full ordered total — since a supplier can ship a colour partially.
+  const shippedPairs = items.reduce((s, i) => s + i.shipmentBatches.reduce((bs, b) => bs + b.pairs, 0), 0);
+  const allItemsFullyArrived = items.length > 0 && items.every(item => {
+    const arrivedPairs = item.shipmentBatches.filter(b => b.arrivalDate).reduce((s, b) => s + b.pairs, 0);
+    return arrivedPairs >= item.totalPairs;
+  });
+  const derivedStatus = allDates.length === 0
+    ? "pending_ship_out"
+    : allItemsFullyArrived
+      ? "completed"
+      : "pending_arrival";
+
+  if (existingShipmentItem) {
     await prisma.shipmentItem.update({ where: { id: existingShipmentItem.id }, data: { totalPairs: shippedPairs } });
-    await prisma.shipment.update({ where: { id: existingShipmentItem.shipmentId }, data: { shipDate: earliestOverall } });
+    await prisma.shipment.update({ where: { id: existingShipmentItem.shipmentId }, data: { shipDate: earliestOverall, status: derivedStatus } });
   } else {
-    const poForShipment = await prisma.purchaseOrder.findUnique({ where: { id: poId }, select: { poNumber: true } });
     await prisma.shipment.create({
       data: {
-        shipmentNumber: poForShipment?.poNumber ?? `SHIP-${poId.slice(0, 8)}`,
+        shipmentNumber: po.poNumber,
         shipDate: earliestOverall,
-        status: "in_transit",
+        status: derivedStatus,
         createdById: createdById ?? null,
         items: { create: [{ poId, totalPairs: shippedPairs }] },
       },
