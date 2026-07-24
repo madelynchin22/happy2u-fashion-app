@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import Image from "next/image";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, CheckCircle2 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +75,16 @@ function StageBar({ stages, size }: { stages: Stage[]; size: "md" | "sm" }) {
 
 function toInputDate(d?: string | null): string {
   return d ? d.slice(0, 10) : "";
+}
+
+// An item is "done" once every ordered pair has both shipped and arrived —
+// i.e. all its shipment batches (there can be several, shipped on different
+// days) together cover the full ordered quantity and each has an arrival date.
+function isItemDone(item: TimelinePO["items"][0]): boolean {
+  const batches = item.shipmentBatches ?? [];
+  if (batches.length === 0) return false;
+  const arrivedPairs = batches.filter(b => b.arrivalDate).reduce((s, b) => s + b.pairs, 0);
+  return arrivedPairs >= item.totalPairs;
 }
 
 // ─── Per-line (SKU + colour) timeline & shipment batches ──────────────────────
@@ -151,11 +161,11 @@ function ItemTimeline({ item, poSentDate, targetSupplierShip, onBatchAdd, onBatc
     { label: "Actual Arrival", done: arrivedPairs > 0,
       actual: arrivedPairs > 0 ? `${arrivedPairs}/${item.totalPairs} pairs` : null,
       target: nextTargetArrival ? `Target ${fmtDate(nextTargetArrival)}` : null },
-    { label: "Targeted Launch", done: false, actual: null, target: targetLaunch ? fmtDate(targetLaunch) : null },
+    { label: "Targeted Launch", done: fullyArrived, actual: null, target: targetLaunch ? fmtDate(targetLaunch) : null },
   ];
 
   return (
-    <div className="pl-8 pr-4 py-2.5 border-b border-gray-50">
+    <div className={`pl-8 pr-4 py-2.5 border-b border-gray-50 ${fullyArrived ? "bg-green-50/40" : ""}`}>
       <div className="flex items-center gap-3 mb-2">
         {item.photoUrl ? (
           <Image src={item.photoUrl} alt={item.colorName ?? ""} width={28} height={28} className="w-7 h-7 rounded-md object-cover border border-gray-100 flex-shrink-0" />
@@ -166,6 +176,11 @@ function ItemTimeline({ item, poSentDate, targetSupplierShip, onBatchAdd, onBatc
           <p className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</p>
           <p className="text-[10px] text-gray-400">{item.totalPairs} pairs ordered</p>
         </div>
+        {fullyArrived && (
+          <span className="flex items-center gap-1 text-[10px] font-semibold text-green-700 bg-green-100 px-2 py-1 rounded-full flex-shrink-0">
+            <CheckCircle2 size={11} /> Completed
+          </span>
+        )}
       </div>
 
       <div className="mb-2.5 pl-1">
@@ -271,9 +286,12 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onBatchAdd, onBat
   }
   const skuGroups = [...skuMap.values()];
 
-  // A colour counts as "shipped" once at least one shipment batch has been recorded
+  // A colour counts as "shipped" once at least one shipment batch has been recorded,
+  // and "completed" once every ordered pair across all its batches has arrived.
   const totalGroups   = skuGroups.length;
   const shippedGroups = skuGroups.filter(g => g.items.some(i => (i.shipmentBatches?.length ?? 0) > 0)).length;
+  const totalItems     = po.items.length;
+  const completedItems = po.items.filter(isItemDone).length;
 
   const daysToArrive = (arriveActual ?? targetArrival)
     ? Math.ceil(((arriveActual ?? targetArrival)!.getTime() - now.getTime()) / 86400000)
@@ -308,11 +326,19 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onBatchAdd, onBat
         <div className="border border-gray-200 rounded-xl">
           <div className="bg-gray-50 px-4 py-2 border-b border-gray-100 rounded-t-xl flex items-center justify-between">
             <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Shipment by SKU</p>
-            <p className="text-xs text-gray-400">{shippedGroups}/{totalGroups} shipped</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-gray-400">{shippedGroups}/{totalGroups} shipped</p>
+              {completedItems > 0 && (
+                <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${completedItems === totalItems ? "bg-green-100 text-green-700" : "bg-blue-50 text-blue-600"}`}>
+                  <CheckCircle2 size={11} /> {completedItems}/{totalItems} completed
+                </span>
+              )}
+            </div>
           </div>
           <div className="divide-y divide-gray-100">
             {skuGroups.map(grp => {
-              const shippedInGroup = grp.items.filter(i => (i.shipmentBatches?.length ?? 0) > 0).length;
+              const shippedInGroup   = grp.items.filter(i => (i.shipmentBatches?.length ?? 0) > 0).length;
+              const completedInGroup = grp.items.filter(isItemDone).length;
               return (
                 <div key={grp.key}>
                   {/* Main SKU group header */}
@@ -323,6 +349,11 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onBatchAdd, onBat
                       <div className="w-7 h-7 rounded-md bg-gray-100 border border-dashed border-gray-200 flex-shrink-0" />
                     )}
                     <p className="text-xs font-bold text-gray-700 flex-1">{grp.key}</p>
+                    {completedInGroup > 0 && (
+                      <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${completedInGroup === grp.items.length ? "bg-green-100 text-green-700" : "bg-blue-50 text-blue-600"}`}>
+                        <CheckCircle2 size={11} /> {completedInGroup}/{grp.items.length} completed
+                      </span>
+                    )}
                     <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${shippedInGroup === grp.items.length ? "bg-green-100 text-green-700" : shippedInGroup > 0 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500"}`}>
                       {shippedInGroup}/{grp.items.length} shipped
                     </span>
