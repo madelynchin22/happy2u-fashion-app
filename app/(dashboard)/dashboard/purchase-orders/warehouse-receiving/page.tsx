@@ -6,6 +6,7 @@ import { POTabs } from "@/components/layout/POTabs";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 const SIZES = [35, 36, 37, 38, 39, 40, 41, 42] as const;
+const MAIN_SKU_RE = /^(S\d{4})/i;
 
 type POItem = {
   id: string;
@@ -85,7 +86,7 @@ function warehouseOrderedBySize(item: POItem, warehouseOutletId: string): Record
 
 // ─── SKU Card ─────────────────────────────────────────────────────────────────
 
-function SKUCard({ po, item, onSaved }: { po: WarehousePO; item: POItem; onSaved: () => void }) {
+function SKUCard({ po, item, onSaved, bordered = true }: { po: WarehousePO; item: POItem; onSaved: () => void; bordered?: boolean }) {
   const delivery = po.outletDeliveries[0];
   const existingRI = delivery?.receiptItems.find(ri => ri.poItemId === item.id);
 
@@ -170,9 +171,7 @@ function SKUCard({ po, item, onSaved }: { po: WarehousePO; item: POItem; onSaved
     onSaved();
   }
 
-  const skuCode = item.h2uSku?.match(/^(S\d+)/i)?.[1] ?? item.h2uSku ?? "";
-  const colour  = item.colorName ?? "";
-  const skuLabel = [skuCode, colour].filter(Boolean).join(" ");
+  const colourLabel = item.colorName || item.h2uSku || "—";
 
   const isDone = existingRI?.receivedQty != null;
   const hasUnresolvedDefect = (existingRI?.defectQty ?? 0) > 0 && !existingRI?.defectResolution;
@@ -180,7 +179,7 @@ function SKUCard({ po, item, onSaved }: { po: WarehousePO; item: POItem; onSaved
   const canPost = isDone && !posted && !hasUnresolvedDefect;
 
   return (
-    <div className="border border-gray-100 rounded-lg overflow-hidden">
+    <div className={bordered ? "border border-gray-100 rounded-lg overflow-hidden" : ""}>
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
@@ -188,7 +187,7 @@ function SKUCard({ po, item, onSaved }: { po: WarehousePO; item: POItem; onSaved
       >
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-3">
-            <span className="font-semibold text-sm text-gray-800">{skuLabel || "—"}</span>
+            <span className="font-semibold text-sm text-gray-800">{colourLabel}</span>
             <span className="text-xs text-gray-500">{warehouseOrdered} pairs ordered</span>
             {posted && (
               <span className="flex items-center gap-1 text-[11px] text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-medium">
@@ -314,6 +313,18 @@ function POBlock({ po, onSaved, defaultOpen }: { po: WarehousePO; onSaved: () =>
   ).length;
   const allDone = po.items.length > 0 && receivedCount === po.items.length;
 
+  // Group colours by main SKU (e.g. S1733C/S1733BGD/S1733H all under "S1733")
+  // so the same shoe's colourways sit together instead of one flat list.
+  const skuGroups = useMemo(() => {
+    const map = new Map<string, POItem[]>();
+    for (const item of po.items) {
+      const key = item.h2uSku?.match(MAIN_SKU_RE)?.[1]?.toUpperCase() ?? item.h2uSku ?? item.id;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(item);
+    }
+    return [...map.entries()].map(([key, items]) => ({ key, items }));
+  }, [po.items]);
+
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
       <div
@@ -340,11 +351,30 @@ function POBlock({ po, onSaved, defaultOpen }: { po: WarehousePO; onSaved: () =>
       </div>
 
       {expanded && (
-        <div className="p-3 space-y-2">
+        <div className="p-3 space-y-3">
           {po.items.length === 0 ? (
             <p className="text-xs text-gray-400 text-center py-4">No items on this PO</p>
           ) : (
-            po.items.map(item => <SKUCard key={item.id} po={po} item={item} onSaved={onSaved} />)
+            skuGroups.map(group => {
+              const groupReceived = group.items.filter(item =>
+                delivery?.receiptItems.some(ri => ri.poItemId === item.id && ri.receivedQty != null)
+              ).length;
+              return (
+                <div key={group.key} className="border border-gray-100 rounded-lg overflow-hidden">
+                  <div className="bg-gray-50/70 px-4 py-2 border-b border-gray-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-700">{group.key}</span>
+                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                      groupReceived === group.items.length ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                    }`}>
+                      {groupReceived}/{group.items.length} received
+                    </span>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {group.items.map(item => <SKUCard key={item.id} po={po} item={item} onSaved={onSaved} bordered={false} />)}
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       )}
