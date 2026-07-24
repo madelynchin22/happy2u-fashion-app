@@ -358,6 +358,7 @@ export default function WarehouseReceivingPage() {
   const [pos, setPos] = useState<WarehousePO[]>([]);
   const [loading, setLoading] = useState(true);
   const [manufacturerFilter, setManufacturerFilter] = useState("all");
+  const [allManufacturers, setAllManufacturers] = useState<{ id: string; name: string }[]>([]);
 
   const load = useCallback(() => {
     fetch("/api/warehouse-receipt")
@@ -367,11 +368,16 @@ export default function WarehouseReceivingPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetch("/api/manufacturers").then(r => r.json()).then(d => setAllManufacturers(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
 
-  const manufacturers = useMemo(
-    () => [...new Set(pos.map(p => p.manufacturer.name))].sort((a, b) => a.localeCompare(b)),
-    [pos]
-  );
+  // Every active manufacturer shows in the filter — including ones with no
+  // warehouse PO yet — so the dropdown doubles as a full supplier reference.
+  const manufacturers = useMemo(() => {
+    const fromPos = pos.map(p => p.manufacturer.name);
+    return [...new Set([...allManufacturers.map(m => m.name), ...fromPos])].sort((a, b) => a.localeCompare(b));
+  }, [pos, allManufacturers]);
   const filteredPos = useMemo(
     () => manufacturerFilter === "all" ? pos : pos.filter(p => p.manufacturer.name === manufacturerFilter),
     [pos, manufacturerFilter]
