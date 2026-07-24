@@ -13,6 +13,7 @@ type POItem = {
   h2uSku: string | null;
   supplierSku: string | null;
   totalPairs: number;
+  outletAllocations: string | null;
 } & { [K in `qty${typeof SIZES[number]}`]: number };
 
 type ReceiptItem = {
@@ -61,11 +62,38 @@ const RESOLUTION_LABEL: Record<string, string> = {
   other: "Other",
 };
 
+// Some POs route their whole quantity to the warehouse, others only route part of
+// each item there via a normal multi-outlet split — read the item's own per-size
+// warehouse allocation when one exists, falling back to its full ordered quantity
+// when it doesn't (the whole-PO-routing case, where no split has been made yet).
+function warehouseOrderedBySize(item: POItem, warehouseOutletId: string): Record<number, number> {
+  if (item.outletAllocations) {
+    try {
+      const allocs: any[] = JSON.parse(item.outletAllocations);
+      const entry = allocs.find(a => a.outletId === warehouseOutletId);
+      if (entry) {
+        const out: Record<number, number> = {};
+        for (const sz of SIZES) out[sz] = Number(entry[`qty${sz}`]) || 0;
+        return out;
+      }
+    } catch {}
+  }
+  const out: Record<number, number> = {};
+  for (const sz of SIZES) out[sz] = (item as any)[`qty${sz}`] || 0;
+  return out;
+}
+
 // ─── SKU Card ─────────────────────────────────────────────────────────────────
 
 function SKUCard({ po, item, onSaved }: { po: WarehousePO; item: POItem; onSaved: () => void }) {
   const delivery = po.outletDeliveries[0];
   const existingRI = delivery?.receiptItems.find(ri => ri.poItemId === item.id);
+
+  // Ordered qty as far as the warehouse is concerned — the whole item when the PO
+  // routes everything there, or just this item's warehouse-bound slice when only
+  // part of it was split off to the warehouse alongside other outlets.
+  const orderedBySize = delivery ? warehouseOrderedBySize(item, delivery.outletId) : {};
+  const warehouseOrdered = existingRI?.orderedQty ?? Object.values(orderedBySize).reduce((s, v) => s + v, 0);
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -113,7 +141,7 @@ function SKUCard({ po, item, onSaved }: { po: WarehousePO; item: POItem; onSaved
       ...(existingRI ? { id: existingRI.id } : {}),
       poItemId: item.id,
       colorName: item.colorName ?? null,
-      orderedQty: item.totalPairs,
+      orderedQty: warehouseOrdered,
       notes: notes || null,
       defectResolution: needsResolution ? (resolution || null) : null,
       defectResolutionNotes: needsResolution ? (resolutionNotes || null) : null,
@@ -161,7 +189,7 @@ function SKUCard({ po, item, onSaved }: { po: WarehousePO; item: POItem; onSaved
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-3">
             <span className="font-semibold text-sm text-gray-800">{skuLabel || "—"}</span>
-            <span className="text-xs text-gray-500">{item.totalPairs} pairs ordered</span>
+            <span className="text-xs text-gray-500">{warehouseOrdered} pairs ordered</span>
             {posted && (
               <span className="flex items-center gap-1 text-[11px] text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-medium">
                 <PackageCheck size={11} /> In inventory
@@ -201,9 +229,9 @@ function SKUCard({ po, item, onSaved }: { po: WarehousePO; item: POItem; onSaved
                 <tr className="border-t border-gray-200">
                   <td className="pr-3 py-1.5 text-gray-500">Ordered</td>
                   {SIZES.map(sz => (
-                    <td key={sz} className="px-1.5 py-1.5 text-center text-gray-500">{(item as any)[`qty${sz}`] || 0}</td>
+                    <td key={sz} className="px-1.5 py-1.5 text-center text-gray-500">{orderedBySize[sz] || 0}</td>
                   ))}
-                  <td className="pl-3 py-1.5 text-center font-medium text-gray-600">{item.totalPairs}</td>
+                  <td className="pl-3 py-1.5 text-center font-medium text-gray-600">{warehouseOrdered}</td>
                 </tr>
                 <tr className="border-t border-gray-100">
                   <td className="pr-3 py-1.5 text-gray-700 font-medium">Received ✓</td>
