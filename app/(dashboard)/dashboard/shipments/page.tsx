@@ -86,6 +86,109 @@ function trackingUrl(s: Shipment): string | null {
   return `https://www.track-trace.com/container?container=${trk}`;
 }
 
+// ── inline detail row ────────────────────────────────────────────────────────
+
+function ShipmentDetailRow({ shipment, poDetail, onSaveDeliveryDate, onBatchAdd, onBatchUpdate, onBatchDelete }: {
+  shipment: Shipment;
+  poDetail: (TimelinePO & { id: string }) | null;
+  onSaveDeliveryDate: (field: "shipDate" | "deliveryDate", value: string) => void;
+  onBatchAdd: (itemId: string, initial: { pairs: number }) => Promise<void>;
+  onBatchUpdate: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
+  onBatchDelete: (batchId: string) => Promise<void>;
+}) {
+  const batch = isBatch(shipment);
+  const selLabel = batch ? batchLabel(shipment) : (shipment.items[0]?.po.productName ?? "Shipment");
+  const selTrack = trackingUrl(shipment);
+
+  return (
+    <div className="p-5 space-y-5">
+      {/* Detail header */}
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="font-bold text-gray-900 text-lg">{shipment.shipmentNumber} · {selLabel}</h2>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_PILL[shipment.status] ?? "bg-gray-100 text-gray-600"}`}>
+              {STATUS_LABEL[shipment.status] ?? shipment.status}
+            </span>
+          </div>
+          <p className="text-sm text-gray-500 mt-1 flex items-center flex-wrap gap-x-1">
+            {shipment.items.map(item => (
+              <Link key={item.po.id} href={`/dashboard/purchase-orders?open=${item.po.id}`}
+                className="text-brand-600 hover:underline">
+                {item.po.poNumber}
+              </Link>
+            ))}
+            {shipment.items.length > 0 && " · "}
+            {shipment.items.reduce((t, i) => t + (i.totalPairs ?? 0), 0)} pairs
+            {[...new Set(shipment.items.map(i => i.po.manufacturer?.name).filter(Boolean))].map(n => ` · ${n}`)}
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          {selTrack && (
+            <a href={selTrack} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+              Track with carrier <ArrowUpRight size={12} />
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div className="border border-gray-100 rounded-xl p-5 bg-white">
+        {poDetail ? (
+          <Timeline po={poDetail} onSave={onSaveDeliveryDate}
+            onBatchAdd={onBatchAdd}
+            onBatchUpdate={onBatchUpdate}
+            onBatchDelete={onBatchDelete} />
+        ) : (
+          <p className="text-xs text-gray-400">Loading timeline…</p>
+        )}
+      </div>
+
+      {/* Events / alerts */}
+      {shipment.events.length > 0 && (
+        <div className="space-y-2">
+          {shipment.events.slice(-3).map(ev => (
+            <div key={ev.id} className={`flex items-start gap-3 p-3 rounded-lg text-sm ${
+              ev.eventType === "delay" || ev.eventType === "customs_hold"
+                ? "bg-red-50 border border-red-100" : "bg-white"
+            }`}>
+              {(ev.eventType === "delay" || ev.eventType === "customs_hold") && (
+                <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
+              )}
+              <div>
+                <p className="font-medium text-gray-800 capitalize">{ev.eventType.replace("_"," ")} · {fmtDate(ev.eventDate)}</p>
+                {ev.notes && <p className="text-gray-600 mt-0.5">{ev.notes}</p>}
+                {ev.location && <p className="text-xs text-gray-400 mt-0.5">{ev.location}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Destination */}
+      {shipment.destination && (
+        <div>
+          <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-1">Destination</p>
+          <p className="text-sm font-medium text-gray-800">{shipment.destination.name}</p>
+          {shipment.destination.address && (
+            <p className="text-sm text-gray-500 mt-0.5">{shipment.destination.address}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-0.5">{shipment.destination.marking} · {shipment.destination.country}</p>
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+        <p className="text-xs text-gray-400">
+          {shipment._count.events} status update{shipment._count.events !== 1 ? "s" : ""}
+        </p>
+        {shipment.notes && <p className="text-xs text-gray-500">{shipment.notes}</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function ShipmentsPage() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [selected, setSelected]   = useState<Shipment | null>(null);
@@ -216,9 +319,6 @@ export default function ShipmentsPage() {
     }
   }
 
-  const selMode = selected ? detectMode(selected) : "sea";
-  const selTrack = selected ? trackingUrl(selected) : null;
-
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -318,13 +418,13 @@ export default function ShipmentsPage() {
                     </div>
                   </td>
                 </tr>,
-                ...g.shipments.map(s => {
+                ...g.shipments.flatMap(s => {
                 const mode   = detectMode(s);
                 const isSelected = selected?.id === s.id;
                 const batch  = isBatch(s);
                 const totalPairs = s.items.reduce((t, i) => t + (i.totalPairs ?? 0), 0);
                 const manufacturers = [...new Set(s.items.map(i => i.po.manufacturer?.name).filter(Boolean))];
-                return (
+                const rows = [
                   <tr key={s.id} onClick={() => setSelected(isSelected ? null : s)}
                     className={`cursor-pointer transition-colors ${isSelected ? "bg-gray-50" : "hover:bg-gray-50"}`}>
                     <td className="px-4 py-3.5">
@@ -366,8 +466,25 @@ export default function ShipmentsPage() {
                         {STATUS_LABEL[s.status] ?? s.status}
                       </span>
                     </td>
-                  </tr>
-                );
+                  </tr>,
+                ];
+                if (isSelected) {
+                  rows.push(
+                    <tr key={`${s.id}-detail`} className="bg-gray-50/60">
+                      <td colSpan={7} className="p-0 border-b border-gray-100">
+                        <ShipmentDetailRow
+                          shipment={s}
+                          poDetail={poDetail}
+                          onSaveDeliveryDate={saveDeliveryDate}
+                          onBatchAdd={addShipmentBatch}
+                          onBatchUpdate={updateShipmentBatch}
+                          onBatchDelete={deleteShipmentBatch}
+                        />
+                      </td>
+                    </tr>
+                  );
+                }
+                return rows;
                 }),
               ])}
             </tbody>
@@ -375,130 +492,11 @@ export default function ShipmentsPage() {
         )}
       </div>
 
-      {/* Detail view */}
-      {!selected && (
+      {!selected && filtered.length > 0 && (
         <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase">
-          Detail view · click any shipment above
+          Click any shipment above to view its timeline
         </p>
       )}
-
-      {selected && (() => {
-        const batch = isBatch(selected);
-        const selLabel = batch ? batchLabel(selected) : (selected.items[0]?.po.productName ?? "Shipment");
-        return (
-          <div className="card p-5 space-y-5">
-            {/* Detail header */}
-            <div className="flex items-start justify-between flex-wrap gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="font-bold text-gray-900 text-lg">{selected.shipmentNumber} · {selLabel}</h2>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_PILL[selected.status] ?? "bg-gray-100 text-gray-600"}`}>
-                    {STATUS_LABEL[selected.status] ?? selected.status}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-500 mt-1 flex items-center flex-wrap gap-x-1">
-                  {selected.items.map(item => (
-                    <Link key={item.po.id} href={`/dashboard/purchase-orders?open=${item.po.id}`}
-                      className="text-brand-600 hover:underline">
-                      {item.po.poNumber}
-                    </Link>
-                  ))}
-                  {selected.items.length > 0 && " · "}
-                  {selected.items.reduce((t, i) => t + (i.totalPairs ?? 0), 0)} pairs
-                  {[...new Set(selected.items.map(i => i.po.manufacturer?.name).filter(Boolean))].map(n => ` · ${n}`)}
-                </p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                {selTrack && (
-                  <a href={selTrack} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                    Track with carrier <ArrowUpRight size={12} />
-                  </a>
-                )}
-              </div>
-            </div>
-
-            {/* Info row */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-1">Mode &amp; carrier</p>
-                <div className="flex items-center gap-1.5">
-                  {selMode === "air" ? <Plane size={14} className="text-blue-500" /> : <Ship size={14} className="text-teal-600" />}
-                  <span className="text-sm font-medium text-gray-800">{selMode === "air" ? "Air" : "Sea"} · {selected.vesselName ?? "—"}</span>
-                </div>
-                <p className="text-xs text-gray-400 font-mono mt-1">{selected.blNumber ?? selected.containerNumber ?? "—"}</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-1">Route</p>
-                <p className="text-sm font-medium text-gray-800">
-                  {selected.portOrigin ?? "Origin"} → {selected.portDestination ?? "Destination"}
-                </p>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-1">ETA</p>
-                <p className="text-sm font-medium text-gray-800">{fmtDate(selected.estimatedArrival)}</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-1">Ship date</p>
-                <p className="text-sm font-medium text-gray-800">{fmtDate(selected.shipDate)}</p>
-              </div>
-            </div>
-
-            {/* Timeline */}
-            <div className="border border-gray-100 rounded-xl p-5">
-              {poDetail ? (
-                <Timeline po={poDetail} onSave={saveDeliveryDate}
-                  onBatchAdd={addShipmentBatch}
-                  onBatchUpdate={updateShipmentBatch}
-                  onBatchDelete={deleteShipmentBatch} />
-              ) : (
-                <p className="text-xs text-gray-400">Loading timeline…</p>
-              )}
-            </div>
-
-            {/* Events / alerts */}
-            {selected.events.length > 0 && (
-              <div className="space-y-2">
-                {selected.events.slice(-3).map(ev => (
-                  <div key={ev.id} className={`flex items-start gap-3 p-3 rounded-lg text-sm ${
-                    ev.eventType === "delay" || ev.eventType === "customs_hold"
-                      ? "bg-red-50 border border-red-100" : "bg-gray-50"
-                  }`}>
-                    {(ev.eventType === "delay" || ev.eventType === "customs_hold") && (
-                      <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
-                    )}
-                    <div>
-                      <p className="font-medium text-gray-800 capitalize">{ev.eventType.replace("_"," ")} · {fmtDate(ev.eventDate)}</p>
-                      {ev.notes && <p className="text-gray-600 mt-0.5">{ev.notes}</p>}
-                      {ev.location && <p className="text-xs text-gray-400 mt-0.5">{ev.location}</p>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Destination */}
-            {selected.destination && (
-              <div>
-                <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase mb-1">Destination</p>
-                <p className="text-sm font-medium text-gray-800">{selected.destination.name}</p>
-                {selected.destination.address && (
-                  <p className="text-sm text-gray-500 mt-0.5">{selected.destination.address}</p>
-                )}
-                <p className="text-xs text-gray-400 mt-0.5">{selected.destination.marking} · {selected.destination.country}</p>
-              </div>
-            )}
-
-            {/* Footer */}
-            <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-              <p className="text-xs text-gray-400">
-                {selected._count.events} status update{selected._count.events !== 1 ? "s" : ""}
-              </p>
-              {selected.notes && <p className="text-xs text-gray-500">{selected.notes}</p>}
-            </div>
-          </div>
-        );
-      })()}
 
       {/* New Shipment Modal */}
       {modal && (
