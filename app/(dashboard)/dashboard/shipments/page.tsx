@@ -12,7 +12,7 @@ type Shipment = {
   shipDate?: string; estimatedArrival?: string; actualArrival?: string;
   status: string; notes?: string;
   destination?: { name: string; marking: string; country: string; address?: string };
-  items: { totalPairs?: number; po: { id: string; poNumber: string; productName?: string; manufacturer?: { name: string } } }[];
+  items: { totalPairs?: number; po: { id: string; poNumber: string; poMonth?: string | null; productName?: string; manufacturer?: { name: string } } }[];
   events: ShipmentEvent[];
   _count: { events: number };
 };
@@ -45,6 +45,30 @@ function fmtDate(d?: string) {
   return format(new Date(d), "dd/MM/yyyy");
 }
 
+const MONTH_ABBR_TO_NUM: Record<string, string> = {
+  JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06",
+  JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12",
+};
+
+// Same "PO month" convention as the Purchase Orders list: an explicit poMonth
+// wins, falling back to parsing the month out of the PO number (e.g. MAY01).
+function monthKey(poMonth?: string | null, poNumber?: string | null): string {
+  if (poMonth) return poMonth;
+  const m = poNumber?.match(/^PO-(\d{4})-([A-Za-z]{3})\d+$/);
+  if (m) {
+    const num = MONTH_ABBR_TO_NUM[m[2].toUpperCase()];
+    if (num) return `${m[1]}-${num}`;
+  }
+  return "unknown";
+}
+
+function monthLabel(key: string): string {
+  if (key === "unknown") return "Not linked to a PO";
+  const [year, month] = key.split("-");
+  const d = new Date(Number(year), Number(month) - 1);
+  return `${d.toLocaleString("en-US", { month: "short" }).toUpperCase()} PO · ${year}`;
+}
+
 function isBatch(s: Shipment) { return s.shipmentNumber.startsWith("BATCH-"); }
 function batchLabel(s: Shipment) {
   const dateStr = s.shipmentNumber.replace("BATCH-", "");
@@ -66,7 +90,6 @@ export default function ShipmentsPage() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [selected, setSelected]   = useState<Shipment | null>(null);
   const [filter, setFilter]       = useState("all");
-  const [modeFilter, setModeFilter] = useState("all");
   const [modal, setModal]         = useState(false);
   const [outlets, setOutlets]     = useState<{id:string;name:string;marking:string}[]>([]);
   const [pos, setPos]             = useState<{id:string;poNumber:string}[]>([]);
@@ -148,23 +171,28 @@ export default function ShipmentsPage() {
     if (filter === "pending_ship_out") return s.status === "pending_ship_out";
     if (filter === "pending_arrival")  return s.status === "pending_arrival";
     if (filter === "completed")        return s.status === "completed";
-    if (modeFilter === "air")   return detectMode(s) === "air";
-    if (modeFilter === "sea")   return detectMode(s) === "sea";
     return true;
-  }), [shipments, filter, modeFilter]);
+  }), [shipments, filter]);
 
-  // Group by the PO each shipment belongs to — each shipping-marked PO gets its own
-  // shipment now, so this is what "grouped by PO number" naturally means here.
+  // Group by month (same convention as the Purchase Orders list) instead of by
+  // individual PO — one PO per group header made for a wall of black bars once
+  // there were more than a couple of POs in flight.
   const groupedShipments = useMemo(() => {
-    const groups: { key: string; poId: string | null; label: string; shipments: Shipment[] }[] = [];
+    const groups = new Map<string, { key: string; shipments: Shipment[] }>();
     for (const s of filtered) {
       const po = s.items[0]?.po;
-      const key = po?.poNumber ?? "__unlinked__";
-      let g = groups.find(g => g.key === key);
-      if (!g) { g = { key, poId: po?.id ?? null, label: po?.poNumber ?? "Not linked to a PO", shipments: [] }; groups.push(g); }
-      g.shipments.push(s);
+      const key = monthKey(po?.poMonth, po?.poNumber);
+      if (!groups.has(key)) groups.set(key, { key, shipments: [] });
+      groups.get(key)!.shipments.push(s);
     }
-    return groups;
+    return [...groups.values()]
+      .sort((a, b) => b.key.localeCompare(a.key))
+      .map(g => ({
+        ...g,
+        shipments: [...g.shipments].sort((a, b) =>
+          (a.items[0]?.po.poNumber ?? "").localeCompare(b.items[0]?.po.poNumber ?? "")
+        ),
+      }));
   }, [filtered]);
 
   async function save() {
@@ -227,25 +255,12 @@ export default function ShipmentsPage() {
           { key:"pending_arrival",  label:"Pending Arrival" },
           { key:"completed",        label:"Completed" },
         ].map(f => (
-          <button key={f.key} onClick={() => { setFilter(f.key); setModeFilter("all"); }}
+          <button key={f.key} onClick={() => setFilter(f.key)}
             className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              filter === f.key && modeFilter === "all"
+              filter === f.key
                 ? "bg-gray-900 text-white"
                 : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
             }`}>{f.label}</button>
-        ))}
-        <div className="w-px h-5 bg-gray-200 mx-1" />
-        {[
-          { key:"all", label:"All modes" },
-          { key:"air", label:"Air only" },
-          { key:"sea", label:"Sea only" },
-        ].map(m => (
-          <button key={m.key} onClick={() => { setModeFilter(m.key); if (m.key !== "all") setFilter("all"); }}
-            className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              modeFilter === m.key && (m.key === "all" ? filter === "all" : true)
-                ? "bg-gray-900 text-white"
-                : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-            }`}>{m.label}</button>
         ))}
       </div>
 
@@ -267,16 +282,11 @@ export default function ShipmentsPage() {
                 <tr key={`g-${g.key}`} className="bg-gray-900">
                   <td colSpan={7} className="px-4 py-2">
                     <div className="flex items-center gap-3">
-                      {g.poId ? (
-                        <Link href={`/dashboard/purchase-orders?open=${g.poId}`}
-                          className="text-white text-xs font-bold tracking-widest uppercase hover:underline flex items-center gap-1">
-                          {g.label} <ArrowUpRight size={11} />
-                        </Link>
-                      ) : (
-                        <span className="text-gray-400 text-xs font-bold tracking-widest uppercase">{g.label}</span>
-                      )}
+                      <span className="text-white text-xs font-bold tracking-widest uppercase">{monthLabel(g.key)}</span>
                       <span className="text-gray-400 text-[11px]">
-                        {g.shipments.length} shipment{g.shipments.length !== 1 ? "s" : ""}
+                        {new Set(g.shipments.map(s => s.items[0]?.po.poNumber)).size} PO
+                        {new Set(g.shipments.map(s => s.items[0]?.po.poNumber)).size !== 1 ? "s" : ""}
+                        {" · "}{g.shipments.length} shipment{g.shipments.length !== 1 ? "s" : ""}
                       </span>
                     </div>
                   </td>
