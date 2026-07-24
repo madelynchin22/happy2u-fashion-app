@@ -257,7 +257,6 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onBatchAdd, onBat
   onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onBatchDelete?: (batchId: string) => Promise<void>;
 }) {
-  const now          = new Date();
   const poSentDate   = po.date         ? new Date(po.date)         : null;
   const arriveActual = po.deliveryDate ? new Date(po.deliveryDate) : null;
 
@@ -293,35 +292,10 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onBatchAdd, onBat
   const totalItems     = po.items.length;
   const completedItems = po.items.filter(isItemDone).length;
 
-  const daysToArrive = (arriveActual ?? targetArrival)
-    ? Math.ceil(((arriveActual ?? targetArrival)!.getTime() - now.getTime()) / 86400000)
-    : null;
-
-  const overallStages: Stage[] = [
-    { label: "PO Submitted", done: !!poSentDate, actual: poSentDate ? fmtDate(poSentDate) : null, target: null },
-    { label: "Supplier Ship", done: !!earliestShip, actual: earliestShip ? fmtDate(earliestShip) : null,
-      target: targetSupplierShip ? `Target ${fmtDate(targetSupplierShip)}` : null },
-    { label: "Actual Arrival", done: !!arriveActual, actual: arriveActual ? fmtDate(arriveActual) : null,
-      target: targetArrival ? `Target ${fmtDate(targetArrival)}` : null },
-    { label: "Targeted Launch", done: false, actual: null,
-      target: targetLaunch ? fmtDate(targetLaunch) : null },
-  ];
-
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-gray-900">Production timeline</p>
-        {daysToArrive !== null && (
-          <p className={`text-xs font-medium ${daysToArrive < 0 ? "text-red-500" : "text-gray-400"}`}>
-            {daysToArrive > 0 ? `Est. arrival in ${daysToArrive} days` : `${Math.abs(daysToArrive)} days overdue`}
-          </p>
-        )}
-      </div>
-
-      {/* Overall 4-stage bar */}
-      <StageBar stages={overallStages} size="md" />
-
-      {/* Per-SKU, per-colour shipment tracking */}
+      {/* Per-SKU, per-colour shipment tracking — each line has its own full
+          timeline, so there's no need for a duplicate overall stage bar here. */}
       {skuGroups.length > 0 && (
         <div className="border border-gray-200 rounded-xl">
           <div className="bg-gray-50 px-4 py-2 border-b border-gray-100 rounded-t-xl flex items-center justify-between">
