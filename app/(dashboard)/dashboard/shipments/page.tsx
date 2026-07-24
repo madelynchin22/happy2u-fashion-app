@@ -90,6 +90,7 @@ export default function ShipmentsPage() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [selected, setSelected]   = useState<Shipment | null>(null);
   const [filter, setFilter]       = useState("all");
+  const [monthFilter, setMonthFilter] = useState("all");
   const [modal, setModal]         = useState(false);
   const [outlets, setOutlets]     = useState<{id:string;name:string;marking:string}[]>([]);
   const [pos, setPos]             = useState<{id:string;poNumber:string}[]>([]);
@@ -167,12 +168,18 @@ export default function ShipmentsPage() {
   const pendingArrival = shipments.filter(s => s.status === "pending_arrival").length;
   const completed      = shipments.filter(s => s.status === "completed").length;
 
+  const months = useMemo(() => {
+    const keys = shipments.map(s => monthKey(s.items[0]?.po.poMonth, s.items[0]?.po.poNumber));
+    return [...new Set(keys)].filter(k => k !== "unknown").sort((a, b) => b.localeCompare(a));
+  }, [shipments]);
+
   const filtered = useMemo(() => shipments.filter(s => {
+    if (monthFilter !== "all" && monthKey(s.items[0]?.po.poMonth, s.items[0]?.po.poNumber) !== monthFilter) return false;
     if (filter === "pending_ship_out") return s.status === "pending_ship_out";
     if (filter === "pending_arrival")  return s.status === "pending_arrival";
     if (filter === "completed")        return s.status === "completed";
     return true;
-  }), [shipments, filter]);
+  }), [shipments, filter, monthFilter]);
 
   // Group by month (same convention as the Purchase Orders list) instead of by
   // individual PO — one PO per group header made for a wall of black bars once
@@ -246,6 +253,26 @@ export default function ShipmentsPage() {
           <p className="text-xs text-gray-400 mt-1">Fully arrived</p>
         </div>
       </div>
+
+      {/* Month pills */}
+      {months.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setMonthFilter("all")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              monthFilter === "all"
+                ? "bg-gray-900 text-white"
+                : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+            }`}>All months</button>
+          {months.map(mk => (
+            <button key={mk} onClick={() => setMonthFilter(mk)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                monthFilter === mk
+                  ? "bg-gray-900 text-white"
+                  : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}>{monthLabel(mk)}</button>
+          ))}
+        </div>
+      )}
 
       {/* Filter pills */}
       <div className="flex items-center gap-2 flex-wrap">
