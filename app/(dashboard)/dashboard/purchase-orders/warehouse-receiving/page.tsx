@@ -306,37 +306,48 @@ function SKUCard({ po, item, onSaved }: { po: WarehousePO; item: POItem; onSaved
 
 // ─── PO Block ─────────────────────────────────────────────────────────────────
 
-function POBlock({ po, onSaved }: { po: WarehousePO; onSaved: () => void }) {
+function POBlock({ po, onSaved, defaultOpen }: { po: WarehousePO; onSaved: () => void; defaultOpen: boolean }) {
+  const [expanded, setExpanded] = useState(defaultOpen);
   const delivery = po.outletDeliveries[0];
-  const allDone = po.items.length > 0 && po.items.every(item =>
+  const receivedCount = po.items.filter(item =>
     delivery?.receiptItems.some(ri => ri.poItemId === item.id && ri.receivedQty != null)
-  );
+  ).length;
+  const allDone = po.items.length > 0 && receivedCount === po.items.length;
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
-      <div className="bg-gray-50 px-5 py-3 flex items-center justify-between border-b border-gray-100">
+      <div
+        className="bg-gray-50 px-5 py-3 flex items-center justify-between border-b border-gray-100 cursor-pointer hover:bg-gray-100 transition-colors"
+        onClick={() => setExpanded(v => !v)}
+      >
         <div className="flex items-center gap-3">
+          <ChevronRight size={14} className={`text-gray-400 transition-transform duration-200 flex-shrink-0 ${expanded ? "rotate-90" : ""}`} />
           <span className="font-bold text-sm text-gray-900">{po.poNumber}</span>
           {po.brand && <span className="text-xs font-medium text-gray-500">{po.brand}</span>}
           {po.productName && <span className="text-xs text-gray-400">{po.productName}</span>}
           <span className="text-xs text-gray-400">· {po.manufacturer.name}</span>
+          <span className="text-xs text-gray-400">· {po.items.length} colour{po.items.length !== 1 ? "s" : ""}</span>
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-400">
           {delivery?.outlet && <span className="font-mono">{delivery.outlet.marking}</span>}
           {po.shipDate && <span>Shipped: <span className="text-gray-600 font-medium">{fmt(po.shipDate)}</span></span>}
-          {allDone && (
+          {allDone ? (
             <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium text-[11px]">All receipts done</span>
+          ) : (
+            <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium text-[11px]">{receivedCount}/{po.items.length} received</span>
           )}
         </div>
       </div>
 
-      <div className="p-3 space-y-2">
-        {po.items.length === 0 ? (
-          <p className="text-xs text-gray-400 text-center py-4">No items on this PO</p>
-        ) : (
-          po.items.map(item => <SKUCard key={item.id} po={po} item={item} onSaved={onSaved} />)
-        )}
-      </div>
+      {expanded && (
+        <div className="p-3 space-y-2">
+          {po.items.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-4">No items on this PO</p>
+          ) : (
+            po.items.map(item => <SKUCard key={item.id} po={po} item={item} onSaved={onSaved} />)
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -390,7 +401,7 @@ export default function WarehouseReceivingPage() {
         </div>
       )}
 
-      {!loading && pos.map(po => <POBlock key={po.id} po={po} onSaved={load} />)}
+      {!loading && pos.map(po => <POBlock key={po.id} po={po} onSaved={load} defaultOpen={pos.length === 1} />)}
     </div>
   );
 }
