@@ -263,51 +263,72 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     ? await prisma.purchaseOrder.update({ where: { id }, data, include: { manufacturer: true, items: true } })
     : await prisma.purchaseOrder.findUniqueOrThrow({ where: { id }, include: { manufacturer: true, items: true } });
 
-  // When the PO is routed via the CN warehouse for supplier QC, ensure a warehouse
-  // OutletDelivery + one OutletReceiptItem per PO item exist, and best-effort stamp the
-  // warehouse as each item's destination so the existing packing-list PDF (which reads
-  // outletAllocations) shows the CN-H2UCNWH marking. Never overwrites an item that already
-  // has an explicit retail-outlet split.
-  if (po.shipToWarehouse && ["submitted", "shipped", "closed"].includes(po.status ?? "")) {
+  // Ensure a warehouse OutletDelivery + matching OutletReceiptItem rows exist for any
+  // item with real quantity routed to a warehouse outlet — whether the whole PO was
+  // routed there via "Ship to CN Warehouse" (which auto-stamps every item's full qty),
+  // or only part of it was sent there through a normal multi-outlet allocation split.
+  // Never overwrites an item that already has an explicit outlet split of its own.
+  if (["submitted", "shipped", "closed"].includes(po.status ?? "")) {
     const warehouseOutlet = await prisma.outlet.findFirst({ where: { isWarehouse: true, isActive: true } });
     if (warehouseOutlet) {
-      for (const item of po.items) {
-        if (item.outletAllocations) continue;
-        const alloc = [{
-          outletId: warehouseOutlet.id,
-          qty36: item.qty36, qty37: item.qty37, qty38: item.qty38, qty39: item.qty39,
-          qty40: item.qty40, qty41: item.qty41, qty42: item.qty42,
-        }];
-        await prisma.purchaseOrderItem.update({ where: { id: item.id }, data: { outletAllocations: JSON.stringify(alloc) } });
+      if (po.shipToWarehouse) {
+        for (const item of po.items) {
+          if (item.outletAllocations) continue;
+          const alloc = [{
+            outletId: warehouseOutlet.id,
+            qty36: item.qty36, qty37: item.qty37, qty38: item.qty38, qty39: item.qty39,
+            qty40: item.qty40, qty41: item.qty41, qty42: item.qty42,
+          }];
+          await prisma.purchaseOrderItem.update({ where: { id: item.id }, data: { outletAllocations: JSON.stringify(alloc) } });
+        }
       }
 
-      let warehouseDelivery = await prisma.outletDelivery.findUnique({
-        where: { poId_outletId: { poId: id, outletId: warehouseOutlet.id } },
-      });
-      if (!warehouseDelivery) {
-        warehouseDelivery = await prisma.outletDelivery.create({
-          data: { poId: id, outletId: warehouseOutlet.id, status: po.status === "shipped" ? "in_transit" : "pending" },
-        });
-      } else if (po.status === "shipped" && warehouseDelivery.status === "pending") {
-        warehouseDelivery = await prisma.outletDelivery.update({
-          where: { id: warehouseDelivery.id }, data: { status: "in_transit" },
-        });
+      const SIZE_KEYS = ["qty36", "qty37", "qty38", "qty39", "qty40", "qty41", "qty42"] as const;
+      function warehousePairs(outletAllocations: string | null): number {
+        if (!outletAllocations) return 0;
+        try {
+          const allocs: any[] = JSON.parse(outletAllocations);
+          const entry = allocs.find(a => a.outletId === warehouseOutlet!.id);
+          if (!entry) return 0;
+          return SIZE_KEYS.reduce((s, k) => s + (Number(entry[k]) || 0), 0);
+        } catch { return 0; }
       }
 
-      const existingReceiptItems = await prisma.outletReceiptItem.findMany({
-        where: { deliveryId: warehouseDelivery.id }, select: { poItemId: true },
+      const freshItems = await prisma.purchaseOrderItem.findMany({
+        where: { poId: id }, select: { id: true, colorName: true, outletAllocations: true },
       });
-      const receiptedItemIds = new Set(existingReceiptItems.map(r => r.poItemId));
-      for (const item of po.items) {
-        if (receiptedItemIds.has(item.id)) continue;
-        await prisma.outletReceiptItem.create({
-          data: {
-            deliveryId: warehouseDelivery.id,
-            poItemId: item.id,
-            colorName: item.colorName ?? null,
-            orderedQty: item.totalPairs ?? 0,
-          },
+      const warehouseItems = freshItems
+        .map(item => ({ item, pairs: warehousePairs(item.outletAllocations) }))
+        .filter(({ pairs }) => pairs > 0);
+
+      if (warehouseItems.length > 0) {
+        let warehouseDelivery = await prisma.outletDelivery.findUnique({
+          where: { poId_outletId: { poId: id, outletId: warehouseOutlet.id } },
         });
+        if (!warehouseDelivery) {
+          warehouseDelivery = await prisma.outletDelivery.create({
+            data: { poId: id, outletId: warehouseOutlet.id, status: po.status === "shipped" ? "in_transit" : "pending" },
+          });
+        } else if (po.status === "shipped" && warehouseDelivery.status === "pending") {
+          warehouseDelivery = await prisma.outletDelivery.update({
+            where: { id: warehouseDelivery.id }, data: { status: "in_transit" },
+          });
+        }
+
+        const existingReceiptItems = await prisma.outletReceiptItem.findMany({
+          where: { deliveryId: warehouseDelivery.id }, select: { id: true, poItemId: true, orderedQty: true },
+        });
+        const existingByItemId = new Map(existingReceiptItems.map(r => [r.poItemId, r]));
+        for (const { item, pairs } of warehouseItems) {
+          const existing = existingByItemId.get(item.id);
+          if (!existing) {
+            await prisma.outletReceiptItem.create({
+              data: { deliveryId: warehouseDelivery.id, poItemId: item.id, colorName: item.colorName ?? null, orderedQty: pairs },
+            });
+          } else if (existing.orderedQty !== pairs) {
+            await prisma.outletReceiptItem.update({ where: { id: existing.id }, data: { orderedQty: pairs } });
+          }
+        }
       }
     }
   }

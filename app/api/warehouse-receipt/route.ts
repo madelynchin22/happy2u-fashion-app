@@ -7,8 +7,11 @@ export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Show any PO with real quantity routed to a warehouse outlet — whether the whole
+  // PO was routed there via the "Ship to CN Warehouse" toggle, or only part of it was
+  // sent there through a normal multi-outlet allocation split.
   const pos = await prisma.purchaseOrder.findMany({
-    where: { shipToWarehouse: true },
+    where: { outletDeliveries: { some: { outlet: { isWarehouse: true } } } },
     include: {
       manufacturer: { select: { id: true, name: true } },
       items: { orderBy: { id: "asc" } },
@@ -21,7 +24,5 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
 
-  // Only POs that actually have a warehouse delivery yet (created once status leaves draft)
-  const result = pos.filter(po => po.outletDeliveries.length > 0);
-  return NextResponse.json(result);
+  return NextResponse.json(pos);
 }
