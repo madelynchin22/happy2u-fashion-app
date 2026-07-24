@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Warehouse, ChevronRight, CheckCircle2, AlertTriangle, PackageCheck } from "lucide-react";
 import { POTabs } from "@/components/layout/POTabs";
 
@@ -357,6 +357,7 @@ function POBlock({ po, onSaved, defaultOpen }: { po: WarehousePO; onSaved: () =>
 export default function WarehouseReceivingPage() {
   const [pos, setPos] = useState<WarehousePO[]>([]);
   const [loading, setLoading] = useState(true);
+  const [manufacturerFilter, setManufacturerFilter] = useState("all");
 
   const load = useCallback(() => {
     fetch("/api/warehouse-receipt")
@@ -366,6 +367,15 @@ export default function WarehouseReceivingPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const manufacturers = useMemo(
+    () => [...new Set(pos.map(p => p.manufacturer.name))].sort((a, b) => a.localeCompare(b)),
+    [pos]
+  );
+  const filteredPos = useMemo(
+    () => manufacturerFilter === "all" ? pos : pos.filter(p => p.manufacturer.name === manufacturerFilter),
+    [pos, manufacturerFilter]
+  );
 
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-6">
@@ -383,11 +393,29 @@ export default function WarehouseReceivingPage() {
         </div>
         {!loading && (
           <div className="text-right">
-            <p className="text-2xl font-bold text-gray-800">{pos.length}</p>
-            <p className="text-xs text-gray-400">PO{pos.length !== 1 ? "s" : ""} routed via warehouse</p>
+            <p className="text-2xl font-bold text-gray-800">{filteredPos.length}</p>
+            <p className="text-xs text-gray-400">PO{filteredPos.length !== 1 ? "s" : ""} routed via warehouse</p>
           </div>
         )}
       </div>
+
+      {!loading && pos.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-gray-500">Supplier</label>
+          <select
+            className="input text-sm w-56"
+            value={manufacturerFilter}
+            onChange={e => setManufacturerFilter(e.target.value)}
+          >
+            <option value="all">All suppliers ({pos.length})</option>
+            {manufacturers.map(name => (
+              <option key={name} value={name}>
+                {name} ({pos.filter(p => p.manufacturer.name === name).length})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {loading && <div className="text-center py-16 text-gray-400 text-sm">Loading…</div>}
 
@@ -401,7 +429,14 @@ export default function WarehouseReceivingPage() {
         </div>
       )}
 
-      {!loading && pos.map(po => <POBlock key={po.id} po={po} onSaved={load} defaultOpen={pos.length === 1} />)}
+      {!loading && pos.length > 0 && filteredPos.length === 0 && (
+        <div className="border border-dashed border-gray-200 rounded-xl p-16 text-center">
+          <Warehouse size={32} className="mx-auto text-gray-200 mb-3" />
+          <p className="text-sm text-gray-400">No POs from {manufacturerFilter}</p>
+        </div>
+      )}
+
+      {!loading && filteredPos.map(po => <POBlock key={po.id} po={po} onSaved={load} defaultOpen={filteredPos.length === 1} />)}
     </div>
   );
 }
