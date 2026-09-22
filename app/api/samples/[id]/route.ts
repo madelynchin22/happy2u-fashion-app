@@ -112,13 +112,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         if (colors.length === 0) {
           colors = [{ name: "", hex: "", code: "" }];
         }
-        const libCount = await prisma.productLibrary.count();
+        // Base the next sequence number on the highest libNumber actually in use,
+        // not just the row count — a plain count breaks once any row's sequence
+        // suffix has outpaced the count (e.g. from gaps left by deletions), which
+        // makes the "next" number collide with one already taken and throws a
+        // unique-constraint error that aborts every draft in this loop.
+        const existingLibs = await prisma.productLibrary.findMany({ select: { libNumber: true } });
+        const maxLibSeq = existingLibs.reduce((max, e) => {
+          const m = e.libNumber?.match(/(\d+)$/);
+          return m ? Math.max(max, parseInt(m[1])) : max;
+        }, 0);
+        let libSeq = Math.max(maxLibSeq, existingLibs.length);
         for (let i = 0; i < colors.length; i++) {
           const cv = colors[i];
           const colorCodeLetter = cv.code || null;
           const mainSkuVal      = (sample as any).mainSku || null;
           const colorSkuVal     = mainSkuVal && colorCodeLetter ? mainSkuVal + colorCodeLetter : null;
-          const libNumber = `PL-${new Date().getFullYear()}-${String(libCount + i + 1).padStart(3, "0")}`;
+          libSeq++;
+          const libNumber = generateOrderNumber("PL", libSeq);
           await prisma.productLibrary.create({
             data: {
               libNumber,
