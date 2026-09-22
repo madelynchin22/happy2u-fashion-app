@@ -410,7 +410,18 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
   const [newColorInput, setNewColorInput] = useState("");
   const [outlets, setOutlets]   = useState<Outlet[]>([]);
   const [allocColorIdx, setAllocColorIdx] = useState(0);
-  const [detailPlPicker, setDetailPlPicker] = useState<{ baseUrl: string } | null>(null);
+  const [detailPlPicker, setDetailPlPicker] = useState<{ baseUrl: string; outlets: Outlet[] } | null>(null);
+
+  // Only offer the outlets actually involved in this PO's item allocations,
+  // instead of every outlet in the system.
+  async function openDetailPlPicker(baseUrl: string) {
+    let picked = outlets;
+    try {
+      const r = await fetch(`/api/purchase-orders/pl-outlets?ids=${id}`);
+      if (r.ok) picked = await r.json();
+    } catch {}
+    setDetailPlPicker({ baseUrl, outlets: picked });
+  }
 
   useEffect(() => {
     fetch("/api/outlets").then(r => r.json()).then(d => setOutlets(Array.isArray(d) ? d : [])).catch(() => {});
@@ -602,12 +613,11 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
       }
       openDownload(`/api/purchase-orders/${id}/pdf`);
       // Open outlet picker for PL download instead of auto-downloading
-      setDetailPlPicker({
-        baseUrl:
-          `/api/purchase-orders/group-pdf-pl?ids=${id}` +
-          `&group=${encodeURIComponent(fresh.poNumber ?? po?.poNumber ?? "")}` +
-          `&supplier=${encodeURIComponent(fresh.manufacturer?.name ?? po?.manufacturer?.name ?? "")}`,
-      });
+      openDetailPlPicker(
+        `/api/purchase-orders/group-pdf-pl?ids=${id}` +
+        `&group=${encodeURIComponent(fresh.poNumber ?? po?.poNumber ?? "")}` +
+        `&supplier=${encodeURIComponent(fresh.manufacturer?.name ?? po?.manufacturer?.name ?? "")}`
+      );
     }
   }
 
@@ -693,8 +703,8 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
 
   return (
     <div className="bg-white overflow-hidden">
-      {detailPlPicker && outlets.length > 0 && (
-        <PlOutletPicker outlets={outlets} baseUrl={detailPlPicker.baseUrl} onClose={() => setDetailPlPicker(null)} />
+      {detailPlPicker && detailPlPicker.outlets.length > 0 && (
+        <PlOutletPicker outlets={detailPlPicker.outlets} baseUrl={detailPlPicker.baseUrl} onClose={() => setDetailPlPicker(null)} />
       )}
       {/* Header */}
       <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200">
@@ -727,7 +737,7 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
           </a>
           {po && (
             <button
-              onClick={() => setDetailPlPicker({ baseUrl: `/api/purchase-orders/group-pdf-pl?ids=${id}&group=${encodeURIComponent(po.poNumber)}&supplier=${encodeURIComponent(po.manufacturer.name)}` })}
+              onClick={() => openDetailPlPicker(`/api/purchase-orders/group-pdf-pl?ids=${id}&group=${encodeURIComponent(po.poNumber)}&supplier=${encodeURIComponent(po.manufacturer.name)}`)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-green-300 rounded-lg hover:bg-green-50 text-green-700">
               <Download size={14} /> Download PL
             </button>
@@ -1185,7 +1195,7 @@ function PurchaseOrdersContent() {
   const [selectedId, setSelectedId]         = useState<string | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<string>("all");
   const [allOutlets, setAllOutlets]         = useState<Outlet[]>([]);
-  const [plPicker, setPlPicker]             = useState<{ baseUrl: string } | null>(null);
+  const [plPicker, setPlPicker]             = useState<{ baseUrl: string; outlets: Outlet[] } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
   const selectedMonth = searchParams.get("month") ?? "all";
@@ -1195,9 +1205,15 @@ function PurchaseOrdersContent() {
     fetch("/api/purchase-orders").then(r => r.json()).then(d => setPos(Array.isArray(d) ? d : []));
   }
 
-  function openPlPicker(baseUrl: string, e: React.MouseEvent) {
+  // Only offer the outlets actually involved in these POs' item allocations,
+  // instead of every outlet in the system.
+  async function openPlPicker(baseUrl: string, poIds: string[], e: React.MouseEvent) {
     e.preventDefault(); e.stopPropagation();
-    setPlPicker({ baseUrl });
+    setPlPicker({ baseUrl, outlets: allOutlets });
+    try {
+      const r = await fetch(`/api/purchase-orders/pl-outlets?ids=${poIds.join(",")}`);
+      if (r.ok) setPlPicker({ baseUrl, outlets: await r.json() });
+    } catch {}
   }
 
   // Per-row inline date picker, keyed by PO id — used both to choose the date a
@@ -1346,8 +1362,8 @@ function PurchaseOrdersContent() {
 
   return (
     <div className="space-y-4">
-      {plPicker && allOutlets.length > 0 && (
-        <PlOutletPicker outlets={allOutlets} baseUrl={plPicker.baseUrl} onClose={() => setPlPicker(null)} />
+      {plPicker && plPicker.outlets.length > 0 && (
+        <PlOutletPicker outlets={plPicker.outlets} baseUrl={plPicker.baseUrl} onClose={() => setPlPicker(null)} />
       )}
 
       {/* Tab navigation */}
@@ -1528,7 +1544,7 @@ function PurchaseOrdersContent() {
                               className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium border border-brand-300 text-brand-700 bg-white rounded-lg hover:bg-brand-50 transition-colors">
                               <Download size={12} /> Download PO
                             </a>
-                            <button onClick={e => openPlPicker(groupPlUrl, e)}
+                            <button onClick={e => openPlPicker(groupPlUrl, sGroup.pos.map(p => p.id), e)}
                               className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium border border-green-300 text-green-700 bg-white rounded-lg hover:bg-green-50 transition-colors">
                               <Download size={12} /> Download PL
                             </button>

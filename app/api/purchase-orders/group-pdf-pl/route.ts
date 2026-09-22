@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { GroupPackingListPDF } from "@/lib/pdf/packing-list-group";
+import { makeOutletResolver } from "@/lib/outlet-resolve";
 import { join } from "path";
 import sharp from "sharp";
 import React from "react";
@@ -56,32 +57,7 @@ export async function GET(req: NextRequest) {
     ? allOutletsRaw.filter(o => selectedOutletIds.has(o.id))
     : allOutletsRaw;
 
-  const outletMapById      = new Map(allOutletsRaw.map(o => [o.id,      o]));
-  const outletMapByMarking = new Map(allOutletsRaw.map(o => [o.marking, o]));
-
-  // Legacy reverse map: old outlet IDs baked into imported PO data → marking
-  // Used when the DB was re-seeded and the stored outletId no longer matches current rows
-  const LEGACY_ID_TO_MARKING: Record<string, string> = {
-    "cmowg9eed0001nkbf2y1yx9d7": "JN53-H2UWM",
-    "cmowg9eee0002nkbfe9eiqekp": "JN55-H2UES",
-    "cmowg9eef0003nkbfrwixoa72": "JN55-H2USA",
-    "cmowg9eef0004nkbfwbxvom6o": "JN59-H2UMV",
-    "cmowg9eeg0005nkbflnslo9rr": "JN62-H2UPTJ",
-    "cmowg9eeg0006nkbf86bo15ax": "JN75-H2UABM",
-    "cmowg9eeh0007nkbfyai2gkfq": "JN75-H2UABMDEP",
-    "cmowg9eei0008nkbfkahlsmcb": "JN75-H2UAK",
-    "cmowg9eei0009nkbfhtoz6o1y": "JN75-H2UHQ",
-    "cmowg9eej000ankbfoo8xwf0z": "JN81-H2UATC",
-    "cmowg9eej000bnkbf9yec4sdi": "JN81-H2UBI",
-  };
-
-  function resolveOutlet(outletId: string) {
-    return outletMapById.get(outletId)
-      ?? (LEGACY_ID_TO_MARKING[outletId]
-          ? outletMapByMarking.get(LEGACY_ID_TO_MARKING[outletId]) ?? null
-          : null)
-      ?? { id: outletId, marking: LEGACY_ID_TO_MARKING[outletId] ?? outletId, name: "" };
-  }
+  const resolveOutlet = makeOutletResolver(allOutletsRaw);
 
   // Sort allOutlets by the order they appear in the first item's outletAllocations
   // (which was imported from Excel, preserving the Excel display order)
