@@ -34,8 +34,14 @@ export async function GET(req: NextRequest) {
     for (const item of po.items) {
       if (!item.outletAllocations) continue;
       try {
-        const allocs: { outletId: string }[] = JSON.parse(item.outletAllocations);
+        const allocs: Record<string, any>[] = JSON.parse(item.outletAllocations);
         for (const a of allocs) {
+          // Editing a PO can leave a zero-quantity row behind for an outlet that
+          // was removed from the allocation — skip those so a stale entry doesn't
+          // make an uninvolved outlet show up in the picker.
+          const totalQty = [36, 37, 38, 39, 40, 41, 42]
+            .reduce((s, sz) => s + (Number(a[`qty${sz}`]) || 0), 0);
+          if (totalQty <= 0) continue;
           const resolved = resolveOutlet(a.outletId);
           if (resolved && "isHQ" in resolved) involvedIds.add(resolved.id);
         }
