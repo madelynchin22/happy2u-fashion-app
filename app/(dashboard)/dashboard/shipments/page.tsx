@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { Plus, Plane, Ship, ArrowUpRight, AlertTriangle, X } from "lucide-react";
 import { format } from "date-fns";
-import { Timeline, TimelinePO } from "@/components/purchase-orders/Timeline";
+import { Timeline, TimelinePO, TimelineOutlet } from "@/components/purchase-orders/Timeline";
 
 type ShipmentEvent = { id: string; eventType: string; eventDate: string; location?: string; notes?: string };
 type Shipment = {
@@ -88,13 +88,16 @@ function trackingUrl(s: Shipment): string | null {
 
 // ── inline detail row ────────────────────────────────────────────────────────
 
-function ShipmentDetailRow({ shipment, poDetail, onSaveDeliveryDate, onBatchAdd, onBatchUpdate, onBatchDelete }: {
+function ShipmentDetailRow({ shipment, poDetail, outlets, onSaveDeliveryDate, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete }: {
   shipment: Shipment;
   poDetail: (TimelinePO & { id: string }) | null;
+  outlets: TimelineOutlet[];
   onSaveDeliveryDate: (field: "shipDate" | "deliveryDate", value: string) => void;
-  onBatchAdd: (itemId: string, initial: { pairs: number }) => Promise<void>;
   onBatchUpdate: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onBatchDelete: (batchId: string) => Promise<void>;
+  onGroupAdd: (itemIds: string[]) => Promise<void>;
+  onGroupUpdate: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
+  onGroupDelete: (groupId: string) => Promise<void>;
 }) {
   const batch = isBatch(shipment);
   const selLabel = batch ? batchLabel(shipment) : (shipment.items[0]?.po.productName ?? "Shipment");
@@ -136,10 +139,12 @@ function ShipmentDetailRow({ shipment, poDetail, onSaveDeliveryDate, onBatchAdd,
       {/* Timeline */}
       <div className="border border-gray-100 rounded-xl p-5 bg-white">
         {poDetail ? (
-          <Timeline po={poDetail} onSave={onSaveDeliveryDate}
-            onBatchAdd={onBatchAdd}
+          <Timeline po={poDetail} outlets={outlets} onSave={onSaveDeliveryDate}
             onBatchUpdate={onBatchUpdate}
-            onBatchDelete={onBatchDelete} />
+            onBatchDelete={onBatchDelete}
+            onGroupAdd={onGroupAdd}
+            onGroupUpdate={onGroupUpdate}
+            onGroupDelete={onGroupDelete} />
         ) : (
           <p className="text-xs text-gray-400">Loading timeline…</p>
         )}
@@ -239,15 +244,6 @@ export default function ShipmentsPage() {
     await refreshPoDetail(poDetail.id);
   }
 
-  async function addShipmentBatch(itemId: string, initial: { pairs: number }) {
-    if (!poDetail) return;
-    await fetch(`/api/po-items/${itemId}/batches`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(initial),
-    });
-    await refreshPoDetail(poDetail.id);
-  }
-
   async function updateShipmentBatch(batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) {
     if (!poDetail) return;
     const item = poDetail.items.find(i => i.shipmentBatches?.some(b => b.id === batchId));
@@ -264,6 +260,32 @@ export default function ShipmentsPage() {
     const item = poDetail.items.find(i => i.shipmentBatches?.some(b => b.id === batchId));
     if (!item) return;
     await fetch(`/api/po-items/${item.id}/batches/${batchId}`, { method: "DELETE" });
+    await refreshPoDetail(poDetail.id);
+  }
+
+  // A SKU ships to every colour as one unit, so these record one shipment
+  // event across all of a main SKU's colours at once.
+  async function addShipmentGroup(itemIds: string[]) {
+    if (!poDetail) return;
+    await fetch(`/api/purchase-orders/${poDetail.id}/shipment-groups`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIds }),
+    });
+    await refreshPoDetail(poDetail.id);
+  }
+
+  async function updateShipmentGroup(groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) {
+    if (!poDetail) return;
+    await fetch(`/api/purchase-orders/${poDetail.id}/shipment-groups/${groupId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    await refreshPoDetail(poDetail.id);
+  }
+
+  async function deleteShipmentGroup(groupId: string) {
+    if (!poDetail) return;
+    await fetch(`/api/purchase-orders/${poDetail.id}/shipment-groups/${groupId}`, { method: "DELETE" });
     await refreshPoDetail(poDetail.id);
   }
 
@@ -475,10 +497,13 @@ export default function ShipmentsPage() {
                         <ShipmentDetailRow
                           shipment={s}
                           poDetail={poDetail}
+                          outlets={outlets}
                           onSaveDeliveryDate={saveDeliveryDate}
-                          onBatchAdd={addShipmentBatch}
                           onBatchUpdate={updateShipmentBatch}
                           onBatchDelete={deleteShipmentBatch}
+                          onGroupAdd={addShipmentGroup}
+                          onGroupUpdate={updateShipmentGroup}
+                          onGroupDelete={deleteShipmentGroup}
                         />
                       </td>
                     </tr>

@@ -364,10 +364,19 @@ model ItemShipmentBatch {
   shipDate    DateTime?
   arrivalDate DateTime?
 
+  // Links batches created together as one "whole SKU ships as one unit" event
+  // (one row per colour, same ship/arrival date) so the UI can present and edit
+  // them as a single shipment even though each colour still gets its own row —
+  // every other consumer (PO status, outlet delivery sync, payment tracking)
+  // keeps reading per-colour rows exactly as before. Null on older, per-colour
+  // entries recorded before this existed.
+  batchGroup  String?
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([poItemId])
+  @@index([batchGroup])
 }
 
 // ─── PACKING LIST ─────────────────────────────────────────────────────────────

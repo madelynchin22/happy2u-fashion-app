@@ -52,7 +52,7 @@ type PODetail = Omit<PO, "items"> & {
     totalPairs: number; discountPrice?: number; lineTotal?: number;
     outletAllocations?: string | null;
     itemShipDate?: string | null;
-    shipmentBatches?: { id: string; pairs: number; shipDate?: string | null; arrivalDate?: string | null }[];
+    shipmentBatches?: { id: string; pairs: number; shipDate?: string | null; arrivalDate?: string | null; batchGroup?: string | null }[];
     receivedQty?: number | null; defectQty?: number | null;
     receiptNotes?: string | null; receiptDate?: string | null;
   }[];
@@ -567,14 +567,6 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
     if (fresh?.id) { setPo(fresh); onRefreshList?.(); }
   }
 
-  async function addShipmentBatch(itemId: string, initial: { pairs: number }) {
-    await fetch(`/api/po-items/${itemId}/batches`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(initial),
-    });
-    await refreshAfterBatchChange();
-  }
-
   async function updateShipmentBatch(batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) {
     const item = po?.items.find(i => i.shipmentBatches?.some(b => b.id === batchId));
     if (!item) return;
@@ -589,6 +581,30 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
     const item = po?.items.find(i => i.shipmentBatches?.some(b => b.id === batchId));
     if (!item) return;
     await fetch(`/api/po-items/${item.id}/batches/${batchId}`, { method: "DELETE" });
+    await refreshAfterBatchChange();
+  }
+
+  // A SKU ships to every colour as one unit, so these record one shipment
+  // event across all of a main SKU's colours at once (one row per colour
+  // behind the scenes, sharing a batchGroup) instead of one at a time.
+  async function addShipmentGroup(itemIds: string[]) {
+    await fetch(`/api/purchase-orders/${id}/shipment-groups`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIds }),
+    });
+    await refreshAfterBatchChange();
+  }
+
+  async function updateShipmentGroup(groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) {
+    await fetch(`/api/purchase-orders/${id}/shipment-groups/${groupId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    await refreshAfterBatchChange();
+  }
+
+  async function deleteShipmentGroup(groupId: string) {
+    await fetch(`/api/purchase-orders/${id}/shipment-groups/${groupId}`, { method: "DELETE" });
     await refreshAfterBatchChange();
   }
 
@@ -1146,9 +1162,11 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
         {/* Production timeline */}
         <div className="border border-gray-100 rounded-xl p-5">
           <Timeline po={po} outlets={outlets} onSave={saveDateField}
-            onBatchAdd={addShipmentBatch}
             onBatchUpdate={updateShipmentBatch}
-            onBatchDelete={deleteShipmentBatch} />
+            onBatchDelete={deleteShipmentBatch}
+            onGroupAdd={addShipmentGroup}
+            onGroupUpdate={updateShipmentGroup}
+            onGroupDelete={deleteShipmentGroup} />
         </div>
 
       </div>

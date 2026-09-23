@@ -10,6 +10,7 @@ export type ShipmentBatch = {
   pairs: number;
   shipDate?: string | null;
   arrivalDate?: string | null;
+  batchGroup?: string | null;
 };
 
 export type TimelineOutlet = { id: string; name: string };
@@ -108,67 +109,112 @@ function isItemDone(item: TimelinePO["items"][0]): boolean {
   return arrivedPairs >= item.totalPairs;
 }
 
-// ─── Per-line (SKU + colour) timeline & shipment batches ──────────────────────
+// ─── SKU-group timeline & shipment batches ────────────────────────────────────
+// A supplier ships every colour of a SKU together, so shipment recording
+// happens once per SKU: one shared stage bar aggregated across all its
+// colours' batches, one shared "Add shipment" that creates a same-dated batch
+// per colour behind the scenes (batchGroup-linked, so PO status / outlet
+// delivery sync / payment tracking still see per-colour rows exactly as
+// before), and a plain read-only colour + outlet breakdown for context.
+// Batches recorded before this existed (batchGroup null) still show
+// individually, tagged by colour, so nothing already on a PO disappears.
 
-function ItemTimeline({ item, poSentDate, targetSupplierShip, outlets, onBatchAdd, onBatchUpdate, onBatchDelete }: {
-  item: TimelinePO["items"][0];
+type TaggedBatch = ShipmentBatch & { itemId: string; colorName?: string };
+
+type GroupRow = { kind: "group"; groupId: string; pairs: number; shipDate?: string | null; arrivalDate?: string | null; colorNames: string[] };
+type SingleRow = { kind: "single"; batch: TaggedBatch };
+type ShipmentRow = GroupRow | SingleRow;
+
+function buildShipmentRows(items: TimelinePO["items"]): ShipmentRow[] {
+  const tagged: TaggedBatch[] = items.flatMap(item =>
+    (item.shipmentBatches ?? []).map(b => ({ ...b, itemId: item.id, colorName: item.colorName }))
+  );
+  const grouped = new Map<string, TaggedBatch[]>();
+  const rows: ShipmentRow[] = [];
+  for (const b of tagged) {
+    if (b.batchGroup) {
+      if (!grouped.has(b.batchGroup)) grouped.set(b.batchGroup, []);
+      grouped.get(b.batchGroup)!.push(b);
+    } else {
+      rows.push({ kind: "single", batch: b });
+    }
+  }
+  for (const [groupId, batches] of grouped.entries()) {
+    rows.push({
+      kind: "group",
+      groupId,
+      pairs: batches.reduce((s, b) => s + b.pairs, 0),
+      shipDate: batches.find(b => b.shipDate)?.shipDate ?? null,
+      arrivalDate: batches.find(b => b.arrivalDate)?.arrivalDate ?? null,
+      colorNames: batches.map(b => b.colorName || "—"),
+    });
+  }
+  return rows;
+}
+
+function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete }: {
+  grp: { key: string; pairs: number; items: TimelinePO["items"] };
   poSentDate: Date | null;
   targetSupplierShip: Date | null;
   outlets: TimelineOutlet[];
-  onBatchAdd?: (itemId: string, initial: { pairs: number }) => Promise<void>;
   onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onBatchDelete?: (batchId: string) => Promise<void>;
+  onGroupAdd?: (itemIds: string[]) => Promise<void>;
+  onGroupUpdate?: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
+  onGroupDelete?: (groupId: string) => Promise<void>;
 }) {
-  const [local, setLocal] = React.useState<Record<string, { pairs?: number; shipDate?: string; arrivalDate?: string }>>({});
+  const [local, setLocal] = React.useState<Record<string, { shipDate?: string; arrivalDate?: string }>>({});
   const [saving, setSaving] = React.useState<Record<string, boolean>>({});
   const [adding, setAdding] = React.useState(false);
 
-  const batches = item.shipmentBatches ?? [];
+  const rows = buildShipmentRows(grp.items);
+  const rowKey = (r: ShipmentRow) => r.kind === "group" ? r.groupId : r.batch.id;
 
-  const val = (b: ShipmentBatch, field: "pairs" | "shipDate" | "arrivalDate") => {
-    const l = local[b.id];
+  const val = (r: ShipmentRow, field: "shipDate" | "arrivalDate") => {
+    const l = local[rowKey(r)];
     if (l && field in l) return l[field] as any;
-    if (field === "pairs") return b.pairs;
-    return toInputDate(b[field]);
+    return toInputDate(r.kind === "group" ? r[field] : r.batch[field]);
   };
 
-  function setLocalField(batchId: string, field: "pairs" | "shipDate" | "arrivalDate", value: any) {
-    setLocal(prev => ({ ...prev, [batchId]: { ...prev[batchId], [field]: value } }));
+  function setLocalField(key: string, field: "shipDate" | "arrivalDate", value: any) {
+    setLocal(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
   }
 
-  async function commit(batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) {
-    setSaving(prev => ({ ...prev, [batchId]: true }));
-    if (onBatchUpdate) await onBatchUpdate(batchId, fields);
-    setSaving(prev => ({ ...prev, [batchId]: false }));
+  async function commit(r: ShipmentRow, fields: { shipDate?: string | null; arrivalDate?: string | null }) {
+    const key = rowKey(r);
+    setSaving(prev => ({ ...prev, [key]: true }));
+    if (r.kind === "group") { if (onGroupUpdate) await onGroupUpdate(r.groupId, fields); }
+    else { if (onBatchUpdate) await onBatchUpdate(r.batch.id, fields); }
+    setSaving(prev => ({ ...prev, [key]: false }));
   }
 
-  async function addBatch() {
-    const remaining = Math.max(0, item.totalPairs - batches.reduce((s, b) => s + b.pairs, 0));
+  async function addShipment() {
     setAdding(true);
-    if (onBatchAdd) await onBatchAdd(item.id, { pairs: remaining });
+    if (onGroupAdd) await onGroupAdd(grp.items.map(i => i.id));
     setAdding(false);
   }
 
-  async function removeBatch(batchId: string) {
-    setSaving(prev => ({ ...prev, [batchId]: true }));
-    if (onBatchDelete) await onBatchDelete(batchId);
+  async function removeRow(r: ShipmentRow) {
+    setSaving(prev => ({ ...prev, [rowKey(r)]: true }));
+    if (r.kind === "group") { if (onGroupDelete) await onGroupDelete(r.groupId); }
+    else { if (onBatchDelete) await onBatchDelete(r.batch.id); }
   }
 
-  const effShipDate = (b: ShipmentBatch) => { const v = val(b, "shipDate"); return v ? new Date(v) : null; };
-  const effArrivalDate = (b: ShipmentBatch) => { const v = val(b, "arrivalDate"); return v ? new Date(v) : null; };
-  const effPairs = (b: ShipmentBatch) => Number(val(b, "pairs")) || 0;
+  const effShipDate = (r: ShipmentRow) => { const v = val(r, "shipDate"); return v ? new Date(v) : null; };
+  const effArrivalDate = (r: ShipmentRow) => { const v = val(r, "arrivalDate"); return v ? new Date(v) : null; };
+  const effPairs = (r: ShipmentRow) => r.kind === "group" ? r.pairs : r.batch.pairs;
 
-  const shippedPairs = batches.reduce((s, b) => s + (effShipDate(b) ? effPairs(b) : 0), 0);
-  const arrivedPairs = batches.reduce((s, b) => s + (effArrivalDate(b) ? effPairs(b) : 0), 0);
+  const shippedPairs = rows.reduce((s, r) => s + (effShipDate(r) ? effPairs(r) : 0), 0);
+  const arrivedPairs = rows.reduce((s, r) => s + (effArrivalDate(r) ? effPairs(r) : 0), 0);
 
-  const pendingTargets = batches
-    .filter(b => effShipDate(b) && !effArrivalDate(b))
-    .map(b => addDays(effShipDate(b)!, 25));
+  const pendingTargets = rows
+    .filter(r => effShipDate(r) && !effArrivalDate(r))
+    .map(r => addDays(effShipDate(r)!, 25));
   const nextTargetArrival = pendingTargets.length > 0 ? pendingTargets.reduce((a, b) => (a < b ? a : b)) : null;
 
-  const fullyArrived = batches.length > 0 && arrivedPairs >= item.totalPairs;
+  const fullyArrived = rows.length > 0 && arrivedPairs >= grp.pairs;
   const latestArrival = fullyArrived
-    ? batches.map(effArrivalDate).filter((d): d is Date => !!d).reduce((a, b) => (a > b ? a : b))
+    ? rows.map(effArrivalDate).filter((d): d is Date => !!d).reduce((a, b) => (a > b ? a : b))
     : null;
 
   const targetLaunch = latestArrival
@@ -178,37 +224,35 @@ function ItemTimeline({ item, poSentDate, targetSupplierShip, outlets, onBatchAd
   const stages: Stage[] = [
     { label: "PO Submitted", done: !!poSentDate, actual: poSentDate ? fmtDate(poSentDate) : null, target: null },
     { label: "Supplier Ship", done: shippedPairs > 0,
-      actual: shippedPairs > 0 ? `${shippedPairs}/${item.totalPairs} pairs` : null,
+      actual: shippedPairs > 0 ? `${shippedPairs}/${grp.pairs} pairs` : null,
       target: targetSupplierShip ? `Target ${fmtDate(targetSupplierShip)}` : null },
     { label: "Actual Arrival", done: arrivedPairs > 0,
-      actual: arrivedPairs > 0 ? `${arrivedPairs}/${item.totalPairs} pairs` : null,
+      actual: arrivedPairs > 0 ? `${arrivedPairs}/${grp.pairs} pairs` : null,
       target: nextTargetArrival ? `Target ${fmtDate(nextTargetArrival)}` : null },
     { label: "Targeted Launch", done: fullyArrived, actual: null, target: targetLaunch ? fmtDate(targetLaunch) : null },
   ];
 
   return (
-    <div className={`pl-8 pr-4 py-2.5 border-b border-gray-50 ${fullyArrived ? "bg-green-50/40" : ""}`}>
-      <div className="flex items-center gap-3 mb-2">
-        {item.photoUrl ? (
-          <Image src={item.photoUrl} alt={item.colorName ?? ""} width={28} height={28} className="w-7 h-7 rounded-md object-cover border border-gray-100 flex-shrink-0" />
-        ) : (
-          <div className="w-7 h-7 rounded-md bg-gray-50 border border-dashed border-gray-200 flex-shrink-0" />
-        )}
-        <div className="flex-1 min-w-0">
-          <p className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</p>
-          <p className="text-[10px] text-gray-400">{item.totalPairs} pairs ordered</p>
-          {(() => {
-            const locations = outletSummary(item, outlets);
-            return locations.length > 0
-              ? <p className="text-[10px] text-gray-400 mt-0.5">{locations.join(" · ")}</p>
-              : null;
-          })()}
-        </div>
-        {fullyArrived && (
-          <span className="flex items-center gap-1 text-[10px] font-semibold text-green-700 bg-green-100 px-2 py-1 rounded-full flex-shrink-0">
-            <CheckCircle2 size={11} /> Completed
-          </span>
-        )}
+    <div className={`pl-8 pr-4 py-2.5 ${fullyArrived ? "bg-green-50/40" : ""}`}>
+      {/* Read-only colour + outlet breakdown — context only, no per-colour recording */}
+      <div className="mb-2.5 space-y-1">
+        {grp.items.map(item => {
+          const locations = outletSummary(item, outlets);
+          return (
+            <div key={item.id} className="flex items-center gap-2 flex-wrap">
+              {item.photoUrl ? (
+                <Image src={item.photoUrl} alt={item.colorName ?? ""} width={20} height={20} className="w-5 h-5 rounded object-cover border border-gray-100 flex-shrink-0" />
+              ) : (
+                <div className="w-5 h-5 rounded bg-gray-50 border border-dashed border-gray-200 flex-shrink-0" />
+              )}
+              <span className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</span>
+              <span className="text-[10px] text-gray-400">{item.totalPairs} pairs</span>
+              {locations.length > 0 && (
+                <span className="text-[10px] text-gray-400">· {locations.join(" · ")}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div className="mb-2.5 pl-1">
@@ -216,28 +260,26 @@ function ItemTimeline({ item, poSentDate, targetSupplierShip, outlets, onBatchAd
       </div>
 
       <div className="bg-gray-50 rounded-lg p-2.5 space-y-2">
-        {batches.length === 0 && (
+        {rows.length === 0 && (
           <p className="text-[10px] text-gray-400">No shipments recorded yet.</p>
         )}
-        {batches.map(b => {
-          const target = effShipDate(b) ? addDays(effShipDate(b)!, 25) : null;
+        {rows.map(r => {
+          const key = rowKey(r);
+          const target = effShipDate(r) ? addDays(effShipDate(r)!, 25) : null;
           return (
-            <div key={b.id} className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1">
-                <input
-                  type="number" min={0}
-                  value={val(b, "pairs")}
-                  onChange={e => setLocalField(b.id, "pairs", e.target.value === "" ? "" : Number(e.target.value))}
-                  onBlur={e => commit(b.id, { pairs: Number(e.target.value) || 0 })}
-                  className="w-16 text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-400"
-                />
+            <div key={key} className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 w-20 flex-shrink-0">
+                <span className="text-xs text-gray-700 font-medium">{effPairs(r)}</span>
                 <span className="text-[10px] text-gray-400">pairs</span>
               </div>
+              {r.kind === "single" && (
+                <span className="text-[10px] text-gray-400 whitespace-nowrap">{r.batch.colorName || "—"}</span>
+              )}
               <div className="flex flex-col">
                 <input
                   type="date"
-                  value={val(b, "shipDate")}
-                  onChange={e => { const v = e.target.value || null; setLocalField(b.id, "shipDate", v ?? ""); commit(b.id, { shipDate: v }); }}
+                  value={val(r, "shipDate")}
+                  onChange={e => { const v = e.target.value || null; setLocalField(key, "shipDate", v ?? ""); commit(r, { shipDate: v }); }}
                   className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-400 w-28"
                 />
                 <span className="text-[9px] text-gray-400">ship date</span>
@@ -245,17 +287,17 @@ function ItemTimeline({ item, poSentDate, targetSupplierShip, outlets, onBatchAd
               <div className="flex flex-col">
                 <input
                   type="date"
-                  value={val(b, "arrivalDate")}
-                  onChange={e => { const v = e.target.value || null; setLocalField(b.id, "arrivalDate", v ?? ""); commit(b.id, { arrivalDate: v }); }}
+                  value={val(r, "arrivalDate")}
+                  onChange={e => { const v = e.target.value || null; setLocalField(key, "arrivalDate", v ?? ""); commit(r, { arrivalDate: v }); }}
                   className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-400 w-28"
                 />
                 <span className="text-[9px] text-gray-400">
                   {target ? `arrival · target ${fmtDate(target)}` : "actual arrival"}
                 </span>
               </div>
-              {saving[b.id] && <span className="text-[9px] text-gray-400">Saving…</span>}
+              {saving[key] && <span className="text-[9px] text-gray-400">Saving…</span>}
               <button
-                onClick={() => removeBatch(b.id)}
+                onClick={() => removeRow(r)}
                 className="ml-auto text-gray-300 hover:text-red-500 transition-colors"
                 title="Remove this shipment"
               >
@@ -265,7 +307,7 @@ function ItemTimeline({ item, poSentDate, targetSupplierShip, outlets, onBatchAd
           );
         })}
         <button
-          onClick={addBatch}
+          onClick={addShipment}
           disabled={adding}
           className="flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 transition-colors disabled:opacity-50"
         >
@@ -278,13 +320,15 @@ function ItemTimeline({ item, poSentDate, targetSupplierShip, outlets, onBatchAd
 
 // ─── Timeline ─────────────────────────────────────────────────────────────────
 
-export function Timeline<TPO extends TimelinePO>({ po, outlets = [], onSave, onBatchAdd, onBatchUpdate, onBatchDelete }: {
+export function Timeline<TPO extends TimelinePO>({ po, outlets = [], onSave, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete }: {
   po: TPO;
   outlets?: TimelineOutlet[];
   onSave?: (field: "shipDate" | "deliveryDate", value: string) => void;
-  onBatchAdd?: (itemId: string, initial: { pairs: number }) => Promise<void>;
   onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onBatchDelete?: (batchId: string) => Promise<void>;
+  onGroupAdd?: (itemIds: string[]) => Promise<void>;
+  onGroupUpdate?: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
+  onGroupDelete?: (groupId: string) => Promise<void>;
 }) {
   const poSentDate   = po.date         ? new Date(po.date)         : null;
   const arriveActual = po.deliveryDate ? new Date(po.deliveryDate) : null;
@@ -361,19 +405,20 @@ export function Timeline<TPO extends TimelinePO>({ po, outlets = [], onSave, onB
                       {shippedInGroup}/{grp.items.length} shipped
                     </span>
                   </div>
-                  {/* Per-colour rows — each with its own full timeline + batches */}
-                  {grp.items.map(item => (
-                    <ItemTimeline
-                      key={item.id}
-                      item={item}
-                      poSentDate={poSentDate}
-                      targetSupplierShip={targetSupplierShip}
-                      outlets={outlets}
-                      onBatchAdd={onBatchAdd}
-                      onBatchUpdate={onBatchUpdate}
-                      onBatchDelete={onBatchDelete}
-                    />
-                  ))}
+                  {/* One shared stage bar + shipment record for the whole SKU —
+                      every colour ships together, so there's no per-colour
+                      timeline here; see the read-only breakdown inside. */}
+                  <SkuGroupShipment
+                    grp={grp}
+                    poSentDate={poSentDate}
+                    targetSupplierShip={targetSupplierShip}
+                    outlets={outlets}
+                    onBatchUpdate={onBatchUpdate}
+                    onBatchDelete={onBatchDelete}
+                    onGroupAdd={onGroupAdd}
+                    onGroupUpdate={onGroupUpdate}
+                    onGroupDelete={onGroupDelete}
+                  />
                 </div>
               );
             })}
