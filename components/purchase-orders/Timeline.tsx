@@ -54,20 +54,6 @@ function itemOutletPairs(item: { outletAllocations?: string | null }, outletId: 
   return SHIPMENT_SIZE_KEYS.reduce((s, sz) => s + (Number(a[`qty${sz}`]) || 0), 0);
 }
 
-// Same per-outlet pairs breakdown shown in the size × colour matrix above —
-// repeated here so each shipment line also shows which locations it's for.
-function outletSummary(item: { outletAllocations?: string | null }, outlets: TimelineOutlet[]): string[] {
-  if (outlets.length === 0) return [];
-  return parseAllocs(item)
-    .map(a => {
-      const sub = SHIPMENT_SIZE_KEYS.reduce((s, sz) => s + (Number(a[`qty${sz}`]) || 0), 0);
-      if (sub <= 0) return null;
-      const o = outlets.find(x => x.id === a.outletId);
-      return o ? `${o.name} ×${sub}` : null;
-    })
-    .filter((s): s is string => !!s);
-}
-
 // Every outlet an item allocates pairs to, and how many — a SKU can span
 // several destination outlets across its colours, and each one gets its own
 // shipment block below since receiving timelines can differ per outlet.
@@ -421,28 +407,9 @@ function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, outlet
 
   return (
     <div className="pl-8 pr-4 py-2.5 space-y-3">
-      {/* Read-only colour + outlet breakdown — context only, no per-colour recording */}
-      <div className="space-y-1">
-        {grp.items.map(item => {
-          const locations = outletSummary(item, outlets);
-          return (
-            <div key={item.id} className="flex items-center gap-2 flex-wrap">
-              {item.photoUrl ? (
-                <Image src={item.photoUrl} alt={item.colorName ?? ""} width={20} height={20} className="w-5 h-5 rounded object-cover border border-gray-100 flex-shrink-0" />
-              ) : (
-                <div className="w-5 h-5 rounded bg-gray-50 border border-dashed border-gray-200 flex-shrink-0" />
-              )}
-              <span className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</span>
-              <span className="text-[10px] text-gray-400">{item.totalPairs} pairs</span>
-              {locations.length > 0 && (
-                <span className="text-[10px] text-gray-400">· {locations.join(" · ")}</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* One shipment block per destination outlet — receiving timelines differ by location */}
+      {/* One shipment block per destination outlet — the colour + outlet
+          breakdown lives inside each block's own Goods receipt section, so
+          there's no need to repeat it here too. */}
       <div className="space-y-2.5">
         {involvedOutlets.map(o => (
           <OutletShipmentBlock
