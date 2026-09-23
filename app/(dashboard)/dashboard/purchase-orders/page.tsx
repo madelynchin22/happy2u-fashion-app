@@ -1145,7 +1145,7 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
 
         {/* Production timeline */}
         <div className="border border-gray-100 rounded-xl p-5">
-          <Timeline po={po} onSave={saveDateField}
+          <Timeline po={po} outlets={outlets} onSave={saveDateField}
             onBatchAdd={addShipmentBatch}
             onBatchUpdate={updateShipmentBatch}
             onBatchDelete={deleteShipmentBatch} />

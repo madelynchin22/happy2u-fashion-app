@@ -12,6 +12,8 @@ export type ShipmentBatch = {
   arrivalDate?: string | null;
 };
 
+export type TimelineOutlet = { id: string; name: string };
+
 export type TimelinePO = {
   date: string;
   deliveryDate?: string;
@@ -23,8 +25,27 @@ export type TimelinePO = {
     totalPairs: number;
     itemShipDate?: string | null;
     shipmentBatches?: ShipmentBatch[];
+    outletAllocations?: string | null;
   }[];
 };
+
+const SHIPMENT_SIZE_KEYS = [36, 37, 38, 39, 40, 41, 42];
+
+// Same per-outlet pairs breakdown shown in the size × colour matrix above —
+// repeated here so each shipment line also shows which locations it's for.
+function outletSummary(item: { outletAllocations?: string | null }, outlets: TimelineOutlet[]): string[] {
+  if (!item.outletAllocations || outlets.length === 0) return [];
+  let allocs: Record<string, any>[] = [];
+  try { allocs = JSON.parse(item.outletAllocations); } catch { return []; }
+  return allocs
+    .map(a => {
+      const sub = SHIPMENT_SIZE_KEYS.reduce((s, sz) => s + (Number(a[`qty${sz}`]) || 0), 0);
+      if (sub <= 0) return null;
+      const o = outlets.find(x => x.id === a.outletId);
+      return o ? `${o.name} ×${sub}` : null;
+    })
+    .filter((s): s is string => !!s);
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -89,10 +110,11 @@ function isItemDone(item: TimelinePO["items"][0]): boolean {
 
 // ─── Per-line (SKU + colour) timeline & shipment batches ──────────────────────
 
-function ItemTimeline({ item, poSentDate, targetSupplierShip, onBatchAdd, onBatchUpdate, onBatchDelete }: {
+function ItemTimeline({ item, poSentDate, targetSupplierShip, outlets, onBatchAdd, onBatchUpdate, onBatchDelete }: {
   item: TimelinePO["items"][0];
   poSentDate: Date | null;
   targetSupplierShip: Date | null;
+  outlets: TimelineOutlet[];
   onBatchAdd?: (itemId: string, initial: { pairs: number }) => Promise<void>;
   onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onBatchDelete?: (batchId: string) => Promise<void>;
@@ -175,6 +197,12 @@ function ItemTimeline({ item, poSentDate, targetSupplierShip, onBatchAdd, onBatc
         <div className="flex-1 min-w-0">
           <p className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</p>
           <p className="text-[10px] text-gray-400">{item.totalPairs} pairs ordered</p>
+          {(() => {
+            const locations = outletSummary(item, outlets);
+            return locations.length > 0
+              ? <p className="text-[10px] text-gray-400 mt-0.5">{locations.join(" · ")}</p>
+              : null;
+          })()}
         </div>
         {fullyArrived && (
           <span className="flex items-center gap-1 text-[10px] font-semibold text-green-700 bg-green-100 px-2 py-1 rounded-full flex-shrink-0">
@@ -250,8 +278,9 @@ function ItemTimeline({ item, poSentDate, targetSupplierShip, onBatchAdd, onBatc
 
 // ─── Timeline ─────────────────────────────────────────────────────────────────
 
-export function Timeline<TPO extends TimelinePO>({ po, onSave, onBatchAdd, onBatchUpdate, onBatchDelete }: {
+export function Timeline<TPO extends TimelinePO>({ po, outlets = [], onSave, onBatchAdd, onBatchUpdate, onBatchDelete }: {
   po: TPO;
+  outlets?: TimelineOutlet[];
   onSave?: (field: "shipDate" | "deliveryDate", value: string) => void;
   onBatchAdd?: (itemId: string, initial: { pairs: number }) => Promise<void>;
   onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
@@ -339,6 +368,7 @@ export function Timeline<TPO extends TimelinePO>({ po, onSave, onBatchAdd, onBat
                       item={item}
                       poSentDate={poSentDate}
                       targetSupplierShip={targetSupplierShip}
+                      outlets={outlets}
                       onBatchAdd={onBatchAdd}
                       onBatchUpdate={onBatchUpdate}
                       onBatchDelete={onBatchDelete}
