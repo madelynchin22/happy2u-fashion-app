@@ -11,6 +11,7 @@ export type ShipmentBatch = {
   shipDate?: string | null;
   arrivalDate?: string | null;
   batchGroup?: string | null;
+  outletId?: string | null;
 };
 
 export type TimelineOutlet = { id: string; name: string };
@@ -32,13 +33,16 @@ export type TimelinePO = {
 
 const SHIPMENT_SIZE_KEYS = [36, 37, 38, 39, 40, 41, 42];
 
+function parseAllocs(item: { outletAllocations?: string | null }): Record<string, any>[] {
+  if (!item.outletAllocations) return [];
+  try { return JSON.parse(item.outletAllocations); } catch { return []; }
+}
+
 // Same per-outlet pairs breakdown shown in the size × colour matrix above —
 // repeated here so each shipment line also shows which locations it's for.
 function outletSummary(item: { outletAllocations?: string | null }, outlets: TimelineOutlet[]): string[] {
-  if (!item.outletAllocations || outlets.length === 0) return [];
-  let allocs: Record<string, any>[] = [];
-  try { allocs = JSON.parse(item.outletAllocations); } catch { return []; }
-  return allocs
+  if (outlets.length === 0) return [];
+  return parseAllocs(item)
     .map(a => {
       const sub = SHIPMENT_SIZE_KEYS.reduce((s, sz) => s + (Number(a[`qty${sz}`]) || 0), 0);
       if (sub <= 0) return null;
@@ -46,6 +50,23 @@ function outletSummary(item: { outletAllocations?: string | null }, outlets: Tim
       return o ? `${o.name} ×${sub}` : null;
     })
     .filter((s): s is string => !!s);
+}
+
+// Every outlet an item allocates pairs to, and how many — a SKU can span
+// several destination outlets across its colours, and each one gets its own
+// shipment block below since receiving timelines can differ per outlet.
+function outletsForGroup(items: TimelinePO["items"], outlets: TimelineOutlet[]): { id: string; name: string; pairs: number }[] {
+  const totals = new Map<string, number>();
+  for (const item of items) {
+    for (const a of parseAllocs(item)) {
+      const sub = SHIPMENT_SIZE_KEYS.reduce((s, sz) => s + (Number(a[`qty${sz}`]) || 0), 0);
+      if (sub <= 0 || !a.outletId) continue;
+      totals.set(a.outletId, (totals.get(a.outletId) ?? 0) + sub);
+    }
+  }
+  return [...totals.entries()]
+    .map(([id, pairs]) => ({ id, name: outlets.find(o => o.id === id)?.name ?? id, pairs }))
+    .sort((a, b) => b.pairs - a.pairs);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -110,56 +131,48 @@ function isItemDone(item: TimelinePO["items"][0]): boolean {
 }
 
 // ─── SKU-group timeline & shipment batches ────────────────────────────────────
-// A supplier ships every colour of a SKU together, so shipment recording
-// happens once per SKU: one shared stage bar aggregated across all its
-// colours' batches, one shared "Add shipment" that creates a same-dated batch
-// per colour behind the scenes (batchGroup-linked, so PO status / outlet
-// delivery sync / payment tracking still see per-colour rows exactly as
-// before), and a plain read-only colour + outlet breakdown for context.
-// Batches recorded before this existed (batchGroup null) still show
-// individually, tagged by colour, so nothing already on a PO disappears.
+// A supplier ships every colour of a SKU together, so colours are never
+// tracked separately — but different destination outlets (e.g. a nearby China
+// warehouse vs. Malaysia HQ) can have very different receiving timelines, so
+// each SKU gets one shipment block PER OUTLET: its own stage bar and its own
+// "Add shipment" that creates a same-dated batch per colour behind the scenes
+// (batchGroup-linked, so PO status / outlet delivery sync / payment tracking
+// still see per-colour rows exactly as before). Batches recorded before this
+// existed (batchGroup null — a whole colour shipped as one un-split unit, outlet
+// unknown) still show individually in a separate legacy list, tagged by colour,
+// so nothing already on a PO disappears.
 
 type TaggedBatch = ShipmentBatch & { itemId: string; colorName?: string };
+type BatchGroupRow = { groupId: string; pairs: number; shipDate?: string | null; arrivalDate?: string | null };
 
-type GroupRow = { kind: "group"; groupId: string; pairs: number; shipDate?: string | null; arrivalDate?: string | null; colorNames: string[] };
-type SingleRow = { kind: "single"; batch: TaggedBatch };
-type ShipmentRow = GroupRow | SingleRow;
-
-function buildShipmentRows(items: TimelinePO["items"]): ShipmentRow[] {
-  const tagged: TaggedBatch[] = items.flatMap(item =>
+function taggedBatches(items: TimelinePO["items"]): TaggedBatch[] {
+  return items.flatMap(item =>
     (item.shipmentBatches ?? []).map(b => ({ ...b, itemId: item.id, colorName: item.colorName }))
   );
-  const grouped = new Map<string, TaggedBatch[]>();
-  const rows: ShipmentRow[] = [];
-  for (const b of tagged) {
-    if (b.batchGroup) {
-      if (!grouped.has(b.batchGroup)) grouped.set(b.batchGroup, []);
-      grouped.get(b.batchGroup)!.push(b);
-    } else {
-      rows.push({ kind: "single", batch: b });
-    }
-  }
-  for (const [groupId, batches] of grouped.entries()) {
-    rows.push({
-      kind: "group",
-      groupId,
-      pairs: batches.reduce((s, b) => s + b.pairs, 0),
-      shipDate: batches.find(b => b.shipDate)?.shipDate ?? null,
-      arrivalDate: batches.find(b => b.arrivalDate)?.arrivalDate ?? null,
-      colorNames: batches.map(b => b.colorName || "—"),
-    });
-  }
-  return rows;
 }
 
-function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete }: {
-  grp: { key: string; pairs: number; items: TimelinePO["items"] };
+function buildGroupRows(batches: TaggedBatch[]): BatchGroupRow[] {
+  const grouped = new Map<string, TaggedBatch[]>();
+  for (const b of batches) {
+    if (!b.batchGroup) continue;
+    if (!grouped.has(b.batchGroup)) grouped.set(b.batchGroup, []);
+    grouped.get(b.batchGroup)!.push(b);
+  }
+  return [...grouped.entries()].map(([groupId, bs]) => ({
+    groupId,
+    pairs: bs.reduce((s, b) => s + b.pairs, 0),
+    shipDate: bs.find(b => b.shipDate)?.shipDate ?? null,
+    arrivalDate: bs.find(b => b.arrivalDate)?.arrivalDate ?? null,
+  }));
+}
+
+function OutletShipmentBlock({ outlet, itemIds, batches, poSentDate, targetSupplierShip, onGroupAdd, onGroupUpdate, onGroupDelete }: {
+  outlet: { id: string; name: string; pairs: number };
+  itemIds: string[];
+  batches: TaggedBatch[];
   poSentDate: Date | null;
   targetSupplierShip: Date | null;
-  outlets: TimelineOutlet[];
-  onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
-  onBatchDelete?: (batchId: string) => Promise<void>;
-  onGroupAdd?: (itemIds: string[]) => Promise<void>;
+  onGroupAdd?: (itemIds: string[], outletId: string) => Promise<void>;
   onGroupUpdate?: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onGroupDelete?: (groupId: string) => Promise<void>;
 }) {
@@ -167,52 +180,47 @@ function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatc
   const [saving, setSaving] = React.useState<Record<string, boolean>>({});
   const [adding, setAdding] = React.useState(false);
 
-  const rows = buildShipmentRows(grp.items);
-  const rowKey = (r: ShipmentRow) => r.kind === "group" ? r.groupId : r.batch.id;
+  const rows = buildGroupRows(batches);
 
-  const val = (r: ShipmentRow, field: "shipDate" | "arrivalDate") => {
-    const l = local[rowKey(r)];
+  const val = (r: BatchGroupRow, field: "shipDate" | "arrivalDate") => {
+    const l = local[r.groupId];
     if (l && field in l) return l[field] as any;
-    return toInputDate(r.kind === "group" ? r[field] : r.batch[field]);
+    return toInputDate(r[field]);
   };
 
-  function setLocalField(key: string, field: "shipDate" | "arrivalDate", value: any) {
-    setLocal(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+  function setLocalField(groupId: string, field: "shipDate" | "arrivalDate", value: any) {
+    setLocal(prev => ({ ...prev, [groupId]: { ...prev[groupId], [field]: value } }));
   }
 
-  async function commit(r: ShipmentRow, fields: { shipDate?: string | null; arrivalDate?: string | null }) {
-    const key = rowKey(r);
-    setSaving(prev => ({ ...prev, [key]: true }));
-    if (r.kind === "group") { if (onGroupUpdate) await onGroupUpdate(r.groupId, fields); }
-    else { if (onBatchUpdate) await onBatchUpdate(r.batch.id, fields); }
-    setSaving(prev => ({ ...prev, [key]: false }));
+  async function commit(r: BatchGroupRow, fields: { shipDate?: string | null; arrivalDate?: string | null }) {
+    setSaving(prev => ({ ...prev, [r.groupId]: true }));
+    if (onGroupUpdate) await onGroupUpdate(r.groupId, fields);
+    setSaving(prev => ({ ...prev, [r.groupId]: false }));
   }
 
   async function addShipment() {
     setAdding(true);
-    if (onGroupAdd) await onGroupAdd(grp.items.map(i => i.id));
+    if (onGroupAdd) await onGroupAdd(itemIds, outlet.id);
     setAdding(false);
   }
 
-  async function removeRow(r: ShipmentRow) {
-    setSaving(prev => ({ ...prev, [rowKey(r)]: true }));
-    if (r.kind === "group") { if (onGroupDelete) await onGroupDelete(r.groupId); }
-    else { if (onBatchDelete) await onBatchDelete(r.batch.id); }
+  async function removeRow(r: BatchGroupRow) {
+    setSaving(prev => ({ ...prev, [r.groupId]: true }));
+    if (onGroupDelete) await onGroupDelete(r.groupId);
   }
 
-  const effShipDate = (r: ShipmentRow) => { const v = val(r, "shipDate"); return v ? new Date(v) : null; };
-  const effArrivalDate = (r: ShipmentRow) => { const v = val(r, "arrivalDate"); return v ? new Date(v) : null; };
-  const effPairs = (r: ShipmentRow) => r.kind === "group" ? r.pairs : r.batch.pairs;
+  const effShipDate = (r: BatchGroupRow) => { const v = val(r, "shipDate"); return v ? new Date(v) : null; };
+  const effArrivalDate = (r: BatchGroupRow) => { const v = val(r, "arrivalDate"); return v ? new Date(v) : null; };
 
-  const shippedPairs = rows.reduce((s, r) => s + (effShipDate(r) ? effPairs(r) : 0), 0);
-  const arrivedPairs = rows.reduce((s, r) => s + (effArrivalDate(r) ? effPairs(r) : 0), 0);
+  const shippedPairs = rows.reduce((s, r) => s + (effShipDate(r) ? r.pairs : 0), 0);
+  const arrivedPairs = rows.reduce((s, r) => s + (effArrivalDate(r) ? r.pairs : 0), 0);
 
   const pendingTargets = rows
     .filter(r => effShipDate(r) && !effArrivalDate(r))
     .map(r => addDays(effShipDate(r)!, 25));
   const nextTargetArrival = pendingTargets.length > 0 ? pendingTargets.reduce((a, b) => (a < b ? a : b)) : null;
 
-  const fullyArrived = rows.length > 0 && arrivedPairs >= grp.pairs;
+  const fullyArrived = rows.length > 0 && arrivedPairs >= outlet.pairs;
   const latestArrival = fullyArrived
     ? rows.map(effArrivalDate).filter((d): d is Date => !!d).reduce((a, b) => (a > b ? a : b))
     : null;
@@ -224,36 +232,17 @@ function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatc
   const stages: Stage[] = [
     { label: "PO Submitted", done: !!poSentDate, actual: poSentDate ? fmtDate(poSentDate) : null, target: null },
     { label: "Supplier Ship", done: shippedPairs > 0,
-      actual: shippedPairs > 0 ? `${shippedPairs}/${grp.pairs} pairs` : null,
+      actual: shippedPairs > 0 ? `${shippedPairs}/${outlet.pairs} pairs` : null,
       target: targetSupplierShip ? `Target ${fmtDate(targetSupplierShip)}` : null },
     { label: "Actual Arrival", done: arrivedPairs > 0,
-      actual: arrivedPairs > 0 ? `${arrivedPairs}/${grp.pairs} pairs` : null,
+      actual: arrivedPairs > 0 ? `${arrivedPairs}/${outlet.pairs} pairs` : null,
       target: nextTargetArrival ? `Target ${fmtDate(nextTargetArrival)}` : null },
     { label: "Targeted Launch", done: fullyArrived, actual: null, target: targetLaunch ? fmtDate(targetLaunch) : null },
   ];
 
   return (
-    <div className={`pl-8 pr-4 py-2.5 ${fullyArrived ? "bg-green-50/40" : ""}`}>
-      {/* Read-only colour + outlet breakdown — context only, no per-colour recording */}
-      <div className="mb-2.5 space-y-1">
-        {grp.items.map(item => {
-          const locations = outletSummary(item, outlets);
-          return (
-            <div key={item.id} className="flex items-center gap-2 flex-wrap">
-              {item.photoUrl ? (
-                <Image src={item.photoUrl} alt={item.colorName ?? ""} width={20} height={20} className="w-5 h-5 rounded object-cover border border-gray-100 flex-shrink-0" />
-              ) : (
-                <div className="w-5 h-5 rounded bg-gray-50 border border-dashed border-gray-200 flex-shrink-0" />
-              )}
-              <span className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</span>
-              <span className="text-[10px] text-gray-400">{item.totalPairs} pairs</span>
-              {locations.length > 0 && (
-                <span className="text-[10px] text-gray-400">· {locations.join(" · ")}</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+    <div className={`rounded-lg border border-gray-100 p-2.5 ${fullyArrived ? "bg-green-50/40" : "bg-white"}`}>
+      <p className="text-xs font-semibold text-gray-700 mb-2">→ {outlet.name} <span className="text-[10px] font-normal text-gray-400">({outlet.pairs} pairs)</span></p>
 
       <div className="mb-2.5 pl-1">
         <StageBar stages={stages} size="sm" />
@@ -264,22 +253,18 @@ function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatc
           <p className="text-[10px] text-gray-400">No shipments recorded yet.</p>
         )}
         {rows.map(r => {
-          const key = rowKey(r);
           const target = effShipDate(r) ? addDays(effShipDate(r)!, 25) : null;
           return (
-            <div key={key} className="flex items-center gap-2 flex-wrap">
+            <div key={r.groupId} className="flex items-center gap-2 flex-wrap">
               <div className="flex items-center gap-1 w-20 flex-shrink-0">
-                <span className="text-xs text-gray-700 font-medium">{effPairs(r)}</span>
+                <span className="text-xs text-gray-700 font-medium">{r.pairs}</span>
                 <span className="text-[10px] text-gray-400">pairs</span>
               </div>
-              {r.kind === "single" && (
-                <span className="text-[10px] text-gray-400 whitespace-nowrap">{r.batch.colorName || "—"}</span>
-              )}
               <div className="flex flex-col">
                 <input
                   type="date"
                   value={val(r, "shipDate")}
-                  onChange={e => { const v = e.target.value || null; setLocalField(key, "shipDate", v ?? ""); commit(r, { shipDate: v }); }}
+                  onChange={e => { const v = e.target.value || null; setLocalField(r.groupId, "shipDate", v ?? ""); commit(r, { shipDate: v }); }}
                   className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-400 w-28"
                 />
                 <span className="text-[9px] text-gray-400">ship date</span>
@@ -288,14 +273,14 @@ function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatc
                 <input
                   type="date"
                   value={val(r, "arrivalDate")}
-                  onChange={e => { const v = e.target.value || null; setLocalField(key, "arrivalDate", v ?? ""); commit(r, { arrivalDate: v }); }}
+                  onChange={e => { const v = e.target.value || null; setLocalField(r.groupId, "arrivalDate", v ?? ""); commit(r, { arrivalDate: v }); }}
                   className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-400 w-28"
                 />
                 <span className="text-[9px] text-gray-400">
                   {target ? `arrival · target ${fmtDate(target)}` : "actual arrival"}
                 </span>
               </div>
-              {saving[key] && <span className="text-[9px] text-gray-400">Saving…</span>}
+              {saving[r.groupId] && <span className="text-[9px] text-gray-400">Saving…</span>}
               <button
                 onClick={() => removeRow(r)}
                 className="ml-auto text-gray-300 hover:text-red-500 transition-colors"
@@ -318,6 +303,95 @@ function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatc
   );
 }
 
+function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete }: {
+  grp: { key: string; pairs: number; items: TimelinePO["items"] };
+  poSentDate: Date | null;
+  targetSupplierShip: Date | null;
+  outlets: TimelineOutlet[];
+  onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
+  onBatchDelete?: (batchId: string) => Promise<void>;
+  onGroupAdd?: (itemIds: string[], outletId: string) => Promise<void>;
+  onGroupUpdate?: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
+  onGroupDelete?: (groupId: string) => Promise<void>;
+}) {
+  const [saving, setSaving] = React.useState<Record<string, boolean>>({});
+  const itemIds = grp.items.map(i => i.id);
+  const involvedOutlets = outletsForGroup(grp.items, outlets);
+  const allBatches = taggedBatches(grp.items);
+  const legacyBatches = allBatches.filter(b => !b.batchGroup);
+
+  async function removeLegacy(batchId: string) {
+    setSaving(prev => ({ ...prev, [batchId]: true }));
+    if (onBatchDelete) await onBatchDelete(batchId);
+  }
+
+  return (
+    <div className="pl-8 pr-4 py-2.5 space-y-3">
+      {/* Read-only colour + outlet breakdown — context only, no per-colour recording */}
+      <div className="space-y-1">
+        {grp.items.map(item => {
+          const locations = outletSummary(item, outlets);
+          return (
+            <div key={item.id} className="flex items-center gap-2 flex-wrap">
+              {item.photoUrl ? (
+                <Image src={item.photoUrl} alt={item.colorName ?? ""} width={20} height={20} className="w-5 h-5 rounded object-cover border border-gray-100 flex-shrink-0" />
+              ) : (
+                <div className="w-5 h-5 rounded bg-gray-50 border border-dashed border-gray-200 flex-shrink-0" />
+              )}
+              <span className="text-xs text-gray-700">{item.colorName || item.h2uSku || "—"}</span>
+              <span className="text-[10px] text-gray-400">{item.totalPairs} pairs</span>
+              {locations.length > 0 && (
+                <span className="text-[10px] text-gray-400">· {locations.join(" · ")}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* One shipment block per destination outlet — receiving timelines differ by location */}
+      <div className="space-y-2.5">
+        {involvedOutlets.map(o => (
+          <OutletShipmentBlock
+            key={o.id}
+            outlet={o}
+            itemIds={itemIds}
+            batches={allBatches.filter(b => b.outletId === o.id)}
+            poSentDate={poSentDate}
+            targetSupplierShip={targetSupplierShip}
+            onGroupAdd={onGroupAdd}
+            onGroupUpdate={onGroupUpdate}
+            onGroupDelete={onGroupDelete}
+          />
+        ))}
+      </div>
+
+      {legacyBatches.length > 0 && (
+        <div className="bg-gray-50 rounded-lg p-2.5 space-y-2">
+          <p className="text-[10px] text-gray-400">Recorded before per-outlet tracking — shown by colour:</p>
+          {legacyBatches.map(b => (
+            <div key={b.id} className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 w-20 flex-shrink-0">
+                <span className="text-xs text-gray-700 font-medium">{b.pairs}</span>
+                <span className="text-[10px] text-gray-400">pairs</span>
+              </div>
+              <span className="text-[10px] text-gray-400 whitespace-nowrap">{b.colorName || "—"}</span>
+              <span className="text-[10px] text-gray-500">{toInputDate(b.shipDate) || "no ship date"}{b.arrivalDate ? ` → ${toInputDate(b.arrivalDate)}` : ""}</span>
+              {saving[b.id] && <span className="text-[9px] text-gray-400">Saving…</span>}
+              <button
+                onClick={() => removeLegacy(b.id)}
+                className="ml-auto text-gray-300 hover:text-red-500 transition-colors"
+                title="Remove this shipment"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Timeline ─────────────────────────────────────────────────────────────────
 
 export function Timeline<TPO extends TimelinePO>({ po, outlets = [], onSave, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete }: {
@@ -326,7 +400,7 @@ export function Timeline<TPO extends TimelinePO>({ po, outlets = [], onSave, onB
   onSave?: (field: "shipDate" | "deliveryDate", value: string) => void;
   onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onBatchDelete?: (batchId: string) => Promise<void>;
-  onGroupAdd?: (itemIds: string[]) => Promise<void>;
+  onGroupAdd?: (itemIds: string[], outletId: string) => Promise<void>;
   onGroupUpdate?: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onGroupDelete?: (groupId: string) => Promise<void>;
 }) {

@@ -45,6 +45,7 @@ model Outlet {
   deliveries        Delivery[]
   outletDeliveries  OutletDelivery[]
   locationInventories LocationInventory[]
+  itemShipmentBatches ItemShipmentBatch[]
 }
 
 // ─── EXCHANGE RATE ───────────────────────────────────────────────────────────
@@ -364,12 +365,20 @@ model ItemShipmentBatch {
   shipDate    DateTime?
   arrivalDate DateTime?
 
-  // Links batches created together as one "whole SKU ships as one unit" event
-  // (one row per colour, same ship/arrival date) so the UI can present and edit
-  // them as a single shipment even though each colour still gets its own row —
-  // every other consumer (PO status, outlet delivery sync, payment tracking)
-  // keeps reading per-colour rows exactly as before. Null on older, per-colour
-  // entries recorded before this existed.
+  // Which destination outlet this batch's pairs are for — different outlets
+  // (e.g. a nearby China warehouse vs. Malaysia HQ) can have very different
+  // receiving timelines even though the supplier ships the whole SKU together,
+  // so shipments are tracked per outlet, not per colour. Null on batches
+  // recorded before this existed (a whole colour shipped as one un-split unit).
+  outletId    String?
+  outlet      Outlet?  @relation(fields: [outletId], references: [id])
+
+  // Links batches created together as one "SKU → this outlet" shipment event
+  // (one row per colour going to that outlet, same ship/arrival date) so the
+  // UI can present and edit them as a single shipment even though each colour
+  // still gets its own row — every other consumer (PO status, outlet delivery
+  // sync, payment tracking) keeps reading per-colour rows exactly as before.
+  // Null on older, per-colour entries recorded before this existed.
   batchGroup  String?
 
   createdAt   DateTime @default(now())
@@ -377,6 +386,7 @@ model ItemShipmentBatch {
 
   @@index([poItemId])
   @@index([batchGroup])
+  @@index([outletId])
 }
 
 // ─── PACKING LIST ─────────────────────────────────────────────────────────────

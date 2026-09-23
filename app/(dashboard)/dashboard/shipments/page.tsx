@@ -95,7 +95,7 @@ function ShipmentDetailRow({ shipment, poDetail, outlets, onSaveDeliveryDate, on
   onSaveDeliveryDate: (field: "shipDate" | "deliveryDate", value: string) => void;
   onBatchUpdate: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onBatchDelete: (batchId: string) => Promise<void>;
-  onGroupAdd: (itemIds: string[]) => Promise<void>;
+  onGroupAdd: (itemIds: string[], outletId: string) => Promise<void>;
   onGroupUpdate: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onGroupDelete: (groupId: string) => Promise<void>;
 }) {
@@ -263,13 +263,14 @@ export default function ShipmentsPage() {
     await refreshPoDetail(poDetail.id);
   }
 
-  // A SKU ships to every colour as one unit, so these record one shipment
-  // event across all of a main SKU's colours at once.
-  async function addShipmentGroup(itemIds: string[]) {
+  // A SKU ships to every colour as one unit, but different destination
+  // outlets can have different receiving timelines, so these record one
+  // shipment event per (SKU, outlet) at once.
+  async function addShipmentGroup(itemIds: string[], outletId: string) {
     if (!poDetail) return;
     await fetch(`/api/purchase-orders/${poDetail.id}/shipment-groups`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemIds }),
+      body: JSON.stringify({ itemIds, outletId }),
     });
     await refreshPoDetail(poDetail.id);
   }

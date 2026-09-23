@@ -1,5 +1,24 @@
 import { prisma } from "@/lib/db";
 
+function itemOutletIds(item: { outletAllocations: string | null }): string[] {
+  if (!item.outletAllocations) return [];
+  try {
+    const allocs: { outletId?: string }[] = JSON.parse(item.outletAllocations);
+    return allocs.map(a => a.outletId).filter((x): x is string => !!x);
+  } catch { return []; }
+}
+
+// An item is "dispatched" once every outlet it's allocated to has a batch —
+// either one tagged with that specific outlet, or (for batches recorded
+// before per-outlet tracking existed) a legacy batch with no outletId, which
+// covered the whole colour in one go and so counts for all its outlets.
+function itemFullyDispatched(item: { outletAllocations: string | null; shipmentBatches: { outletId: string | null }[] }): boolean {
+  const outletIds = itemOutletIds(item);
+  if (outletIds.length === 0) return item.shipmentBatches.length > 0;
+  if (item.shipmentBatches.some(b => !b.outletId)) return true;
+  return outletIds.every(oid => item.shipmentBatches.some(b => b.outletId === oid));
+}
+
 // Recomputes everything downstream of a PO's shipment batches: each item's
 // itemShipDate (earliest batch ship date — the cheap "has this colour started
 // shipping" gate used by payment-tracking/outlet-receipt), the PO's own
@@ -16,7 +35,7 @@ export async function syncPoShipmentState(poId: string, createdById?: string | n
       id: true,
       totalPairs: true,
       outletAllocations: true,
-      shipmentBatches: { select: { pairs: true, shipDate: true, arrivalDate: true } },
+      shipmentBatches: { select: { pairs: true, shipDate: true, arrivalDate: true, outletId: true } },
     },
   });
 
@@ -29,7 +48,7 @@ export async function syncPoShipmentState(poId: string, createdById?: string | n
 
   const allDates = items.flatMap(i => i.shipmentBatches.map(b => b.shipDate)).filter((d): d is Date => !!d);
   const earliestOverall = allDates.length > 0 ? allDates.reduce((a, b) => (a < b ? a : b)) : null;
-  const everyItemHasBatch = items.length > 0 && items.every(i => i.shipmentBatches.length > 0);
+  const everyItemHasBatch = items.length > 0 && items.every(itemFullyDispatched);
 
   const poData: Record<string, any> = { shipDate: earliestOverall };
   if (!earliestOverall) {
@@ -39,14 +58,17 @@ export async function syncPoShipmentState(poId: string, createdById?: string | n
   }
   await prisma.purchaseOrder.update({ where: { id: poId }, data: poData });
 
-  // Sync OutletDelivery statuses: in_transit only for outlets receiving shipped items
+  // Sync OutletDelivery statuses: in_transit only for outlets that actually
+  // have a batch shipping to them (or a legacy whole-colour batch, which
+  // covers every one of that colour's outlets).
   const shippedOutletIds = new Set<string>();
   for (const item of items) {
-    if (item.shipmentBatches.length === 0 || !item.outletAllocations) continue;
-    try {
-      const allocs: { outletId: string }[] = JSON.parse(item.outletAllocations);
-      for (const a of allocs) { if (a.outletId) shippedOutletIds.add(a.outletId); }
-    } catch {}
+    const outletIds = itemOutletIds(item);
+    if (outletIds.length === 0) continue;
+    const hasLegacyBatch = item.shipmentBatches.some(b => !b.outletId);
+    for (const oid of outletIds) {
+      if (hasLegacyBatch || item.shipmentBatches.some(b => b.outletId === oid)) shippedOutletIds.add(oid);
+    }
   }
   for (const outletId of shippedOutletIds) {
     const exists = await prisma.outletDelivery.findUnique({ where: { poId_outletId: { poId, outletId } } });

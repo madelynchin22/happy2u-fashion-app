@@ -52,7 +52,7 @@ type PODetail = Omit<PO, "items"> & {
     totalPairs: number; discountPrice?: number; lineTotal?: number;
     outletAllocations?: string | null;
     itemShipDate?: string | null;
-    shipmentBatches?: { id: string; pairs: number; shipDate?: string | null; arrivalDate?: string | null; batchGroup?: string | null }[];
+    shipmentBatches?: { id: string; pairs: number; shipDate?: string | null; arrivalDate?: string | null; batchGroup?: string | null; outletId?: string | null }[];
     receivedQty?: number | null; defectQty?: number | null;
     receiptNotes?: string | null; receiptDate?: string | null;
   }[];
@@ -584,13 +584,14 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
     await refreshAfterBatchChange();
   }
 
-  // A SKU ships to every colour as one unit, so these record one shipment
-  // event across all of a main SKU's colours at once (one row per colour
-  // behind the scenes, sharing a batchGroup) instead of one at a time.
-  async function addShipmentGroup(itemIds: string[]) {
+  // A SKU ships to every colour as one unit, but different destination
+  // outlets can have different receiving timelines, so these record one
+  // shipment event per (SKU, outlet) — one row per colour behind the scenes,
+  // sharing a batchGroup — instead of one at a time.
+  async function addShipmentGroup(itemIds: string[], outletId: string) {
     await fetch(`/api/purchase-orders/${id}/shipment-groups`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemIds }),
+      body: JSON.stringify({ itemIds, outletId }),
     });
     await refreshAfterBatchChange();
   }
