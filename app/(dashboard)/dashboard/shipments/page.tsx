@@ -3,7 +3,20 @@ import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { Plus, Plane, Ship, ArrowUpRight, AlertTriangle, X } from "lucide-react";
 import { format } from "date-fns";
-import { Timeline, TimelinePO, TimelineOutlet } from "@/components/purchase-orders/Timeline";
+import { Timeline, TimelinePO, TimelineOutlet, ReceiptFields } from "@/components/purchase-orders/Timeline";
+
+// Richer than Timeline's own TimelineOutletDelivery (which omits ids it doesn't
+// need) — this page looks up the delivery/receiptItem id itself to PATCH them.
+type OutletDeliveryFull = {
+  id: string;
+  outletId: string;
+  receiptItems: {
+    id: string; poItemId: string; colorName?: string | null;
+    orderedQty: number; receivedQty?: number | null;
+    defectQty?: number | null; missingQty?: number | null;
+  }[];
+};
+type PoDetail = TimelinePO & { id: string; outletDeliveries?: OutletDeliveryFull[] };
 
 type ShipmentEvent = { id: string; eventType: string; eventDate: string; location?: string; notes?: string };
 type Shipment = {
@@ -88,9 +101,9 @@ function trackingUrl(s: Shipment): string | null {
 
 // ── inline detail row ────────────────────────────────────────────────────────
 
-function ShipmentDetailRow({ shipment, poDetail, outlets, onSaveDeliveryDate, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete }: {
+function ShipmentDetailRow({ shipment, poDetail, outlets, onSaveDeliveryDate, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete, onReceiptSave }: {
   shipment: Shipment;
-  poDetail: (TimelinePO & { id: string }) | null;
+  poDetail: PoDetail | null;
   outlets: TimelineOutlet[];
   onSaveDeliveryDate: (field: "shipDate" | "deliveryDate", value: string) => void;
   onBatchUpdate: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
@@ -98,6 +111,7 @@ function ShipmentDetailRow({ shipment, poDetail, outlets, onSaveDeliveryDate, on
   onGroupAdd: (itemIds: string[], outletId: string) => Promise<void>;
   onGroupUpdate: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onGroupDelete: (groupId: string) => Promise<void>;
+  onReceiptSave: (outletId: string, poItemId: string, colorName: string | null, orderedQty: number, fields: ReceiptFields) => Promise<void>;
 }) {
   const batch = isBatch(shipment);
   const selLabel = batch ? batchLabel(shipment) : (shipment.items[0]?.po.productName ?? "Shipment");
@@ -139,12 +153,13 @@ function ShipmentDetailRow({ shipment, poDetail, outlets, onSaveDeliveryDate, on
       {/* Timeline */}
       <div className="border border-gray-100 rounded-xl p-5 bg-white">
         {poDetail ? (
-          <Timeline po={poDetail} outlets={outlets} onSave={onSaveDeliveryDate}
+          <Timeline po={poDetail} outlets={outlets} outletDeliveries={poDetail.outletDeliveries ?? []} onSave={onSaveDeliveryDate}
             onBatchUpdate={onBatchUpdate}
             onBatchDelete={onBatchDelete}
             onGroupAdd={onGroupAdd}
             onGroupUpdate={onGroupUpdate}
-            onGroupDelete={onGroupDelete} />
+            onGroupDelete={onGroupDelete}
+            onReceiptSave={onReceiptSave} />
         ) : (
           <p className="text-xs text-gray-400">Loading timeline…</p>
         )}
@@ -203,7 +218,7 @@ export default function ShipmentsPage() {
   const [outlets, setOutlets]     = useState<{id:string;name:string;marking:string}[]>([]);
   const [pos, setPos]             = useState<{id:string;poNumber:string}[]>([]);
   const [saving, setSaving]       = useState(false);
-  const [poDetail, setPoDetail]   = useState<TimelinePO & { id: string } | null>(null);
+  const [poDetail, setPoDetail]   = useState<PoDetail | null>(null);
   const [form, setForm]           = useState({
     containerNumber:"", vesselName:"", blNumber:"", portOrigin:"", portDestination:"",
     shipDate:"", estimatedArrival:"", destinationId:"", notes:"", poIds:[] as string[],
@@ -287,6 +302,23 @@ export default function ShipmentsPage() {
   async function deleteShipmentGroup(groupId: string) {
     if (!poDetail) return;
     await fetch(`/api/purchase-orders/${poDetail.id}/shipment-groups/${groupId}`, { method: "DELETE" });
+    await refreshPoDetail(poDetail.id);
+  }
+
+  // Records what actually arrived at one outlet for one colour, through the
+  // same OutletDelivery/OutletReceiptItem records the Outlet Receipt Submit
+  // and China Warehouse Receiving pages read from.
+  async function saveReceiptItem(outletId: string, poItemId: string, colorName: string | null, orderedQty: number, fields: ReceiptFields) {
+    if (!poDetail) return;
+    const delivery = poDetail.outletDeliveries?.find(d => d.outletId === outletId);
+    if (!delivery) return;
+    const existing = delivery.receiptItems.find(ri => ri.poItemId === poItemId);
+    await fetch(`/api/outlet-deliveries/${delivery.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        receiptItems: [{ id: existing?.id, poItemId, colorName, orderedQty, ...fields }],
+      }),
+    });
     await refreshPoDetail(poDetail.id);
   }
 
@@ -505,6 +537,7 @@ export default function ShipmentsPage() {
                           onGroupAdd={addShipmentGroup}
                           onGroupUpdate={updateShipmentGroup}
                           onGroupDelete={deleteShipmentGroup}
+                          onReceiptSave={saveReceiptItem}
                         />
                       </td>
                     </tr>

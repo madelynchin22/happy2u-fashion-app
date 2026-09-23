@@ -37,7 +37,7 @@ type OutletDelivery = {
   receiptItems: {
     id: string; poItemId: string; colorName?: string | null;
     orderedQty: number; receivedQty?: number | null;
-    defectQty?: number | null; notes?: string | null;
+    defectQty?: number | null; missingQty?: number | null; notes?: string | null;
   }[];
 };
 
@@ -609,6 +609,24 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
     await refreshAfterBatchChange();
   }
 
+  // Records what actually arrived at one outlet for one colour — good/defect/missing
+  // pairs — through the same OutletDelivery/OutletReceiptItem records the Outlet
+  // Receipt Submit and China Warehouse Receiving pages read from, so all three stay
+  // in sync. A missing OutletDelivery means no shipment has been recorded to this
+  // outlet yet (created automatically once one is), so this is a no-op until then.
+  async function saveReceiptItem(outletId: string, poItemId: string, colorName: string | null, orderedQty: number, fields: { receivedQty: number; defectQty: number; missingQty: number }) {
+    const delivery = po?.outletDeliveries?.find(d => d.outletId === outletId);
+    if (!delivery) return;
+    const existing = delivery.receiptItems.find(ri => ri.poItemId === poItemId);
+    await fetch(`/api/outlet-deliveries/${delivery.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        receiptItems: [{ id: existing?.id, poItemId, colorName, orderedQty, ...fields }],
+      }),
+    });
+    await refreshAfterBatchChange();
+  }
+
   async function submitOrder() {
     const res = await fetch(`/api/purchase-orders/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -1162,12 +1180,13 @@ function DetailPanel({ id, onClose, onRefreshList }: { id: string; onClose: () =
 
         {/* Production timeline */}
         <div className="border border-gray-100 rounded-xl p-5">
-          <Timeline po={po} outlets={outlets} onSave={saveDateField}
+          <Timeline po={po} outlets={outlets} outletDeliveries={po.outletDeliveries ?? []} onSave={saveDateField}
             onBatchUpdate={updateShipmentBatch}
             onBatchDelete={deleteShipmentBatch}
             onGroupAdd={addShipmentGroup}
             onGroupUpdate={updateShipmentGroup}
-            onGroupDelete={deleteShipmentGroup} />
+            onGroupDelete={deleteShipmentGroup}
+            onReceiptSave={saveReceiptItem} />
         </div>
 
       </div>

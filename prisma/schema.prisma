@@ -754,6 +754,10 @@ model OutletReceiptItem {
   orderedQty   Int            @default(0)
   receivedQty  Int?
   defectQty    Int?
+  // Ordered but never accounted for on arrival (short-shipped / lost in transit).
+  // Recorded explicitly rather than derived from orderedQty - receivedQty so it
+  // stays a fixed record even if the PO's ordered quantity is edited later.
+  missingQty   Int?
   notes        String?
   receiptDate  DateTime?
 

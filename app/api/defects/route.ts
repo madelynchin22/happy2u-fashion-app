@@ -8,7 +8,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const items = await prisma.outletReceiptItem.findMany({
-    where: { defectQty: { gt: 0 } },
+    where: { OR: [{ defectQty: { gt: 0 } }, { missingQty: { gt: 0 } }] },
     include: {
       delivery: {
         include: {

@@ -16,6 +16,15 @@ export type ShipmentBatch = {
 
 export type TimelineOutlet = { id: string; name: string };
 
+export type TimelineReceiptItem = {
+  poItemId: string;
+  receivedQty?: number | null;
+  defectQty?: number | null;
+  missingQty?: number | null;
+};
+export type TimelineOutletDelivery = { outletId: string; receiptItems: TimelineReceiptItem[] };
+export type ReceiptFields = { receivedQty: number; defectQty: number; missingQty: number };
+
 export type TimelinePO = {
   date: string;
   deliveryDate?: string;
@@ -36,6 +45,13 @@ const SHIPMENT_SIZE_KEYS = [36, 37, 38, 39, 40, 41, 42];
 function parseAllocs(item: { outletAllocations?: string | null }): Record<string, any>[] {
   if (!item.outletAllocations) return [];
   try { return JSON.parse(item.outletAllocations); } catch { return []; }
+}
+
+// How many of this item's (colour's) pairs are allocated to one specific outlet.
+function itemOutletPairs(item: { outletAllocations?: string | null }, outletId: string): number {
+  const a = parseAllocs(item).find(x => x.outletId === outletId);
+  if (!a) return 0;
+  return SHIPMENT_SIZE_KEYS.reduce((s, sz) => s + (Number(a[`qty${sz}`]) || 0), 0);
 }
 
 // Same per-outlet pairs breakdown shown in the size × colour matrix above —
@@ -166,15 +182,73 @@ function buildGroupRows(batches: TaggedBatch[]): BatchGroupRow[] {
   }));
 }
 
-function OutletShipmentBlock({ outlet, itemIds, batches, poSentDate, targetSupplierShip, onGroupAdd, onGroupUpdate, onGroupDelete }: {
+// Good / defect / missing pairs for one colour at one outlet — writes through
+// to the same OutletReceiptItem the Outlet Receipt Submit and China Warehouse
+// Receiving pages read from, so all three views of "what arrived" stay in sync.
+function ReceivingRow({ item, ordered, existing, onSave }: {
+  item: { id: string; colorName?: string };
+  ordered: number;
+  existing?: TimelineReceiptItem;
+  onSave?: (poItemId: string, colorName: string | null, orderedQty: number, fields: ReceiptFields) => Promise<void>;
+}) {
+  const [local, setLocal] = React.useState<{ good?: string; defect?: string; missing?: string }>({});
+  const [saving, setSaving] = React.useState(false);
+
+  const existingGood = existing ? (existing.receivedQty ?? 0) - (existing.defectQty ?? 0) : null;
+  const val = (field: "good" | "defect" | "missing") => {
+    if (field in local) return local[field] ?? "";
+    if (field === "good") return existingGood != null ? String(existingGood) : "";
+    if (field === "defect") return existing?.defectQty != null ? String(existing.defectQty) : "";
+    return existing?.missingQty != null ? String(existing.missingQty) : "";
+  };
+
+  async function commit(field: "good" | "defect" | "missing", value: string) {
+    setLocal(prev => ({ ...prev, [field]: value }));
+    const good    = field === "good"    ? Number(value) || 0 : Number(val("good"))    || 0;
+    const defect  = field === "defect"  ? Number(value) || 0 : Number(val("defect"))  || 0;
+    const missing = field === "missing" ? Number(value) || 0 : Number(val("missing")) || 0;
+    setSaving(true);
+    if (onSave) await onSave(item.id, item.colorName ?? null, ordered, { receivedQty: good + defect, defectQty: defect, missingQty: missing });
+    setSaving(false);
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[10px] text-gray-500 w-20 flex-shrink-0 truncate">{item.colorName || "—"}</span>
+      <span className="text-[10px] text-gray-400 w-16 flex-shrink-0">{ordered} ordered</span>
+      {(["good", "defect", "missing"] as const).map(field => (
+        <div key={field} className="flex flex-col">
+          <input
+            type="number" min={0}
+            value={val(field)}
+            onChange={e => setLocal(prev => ({ ...prev, [field]: e.target.value }))}
+            onBlur={e => commit(field, e.target.value)}
+            className={`w-14 text-xs border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 ${
+              field === "defect" ? "border-red-200 text-red-700 focus:ring-red-400"
+              : field === "missing" ? "border-amber-200 text-amber-700 focus:ring-amber-400"
+              : "border-gray-200 text-gray-700 focus:ring-brand-400"
+            }`}
+          />
+          <span className="text-[9px] text-gray-400 capitalize">{field}</span>
+        </div>
+      ))}
+      {saving && <span className="text-[9px] text-gray-400">Saving…</span>}
+    </div>
+  );
+}
+
+function OutletShipmentBlock({ outlet, items, itemIds, batches, delivery, poSentDate, targetSupplierShip, onGroupAdd, onGroupUpdate, onGroupDelete, onReceiptSave }: {
   outlet: { id: string; name: string; pairs: number };
+  items: TimelinePO["items"];
   itemIds: string[];
   batches: TaggedBatch[];
+  delivery?: TimelineOutletDelivery;
   poSentDate: Date | null;
   targetSupplierShip: Date | null;
   onGroupAdd?: (itemIds: string[], outletId: string) => Promise<void>;
   onGroupUpdate?: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onGroupDelete?: (groupId: string) => Promise<void>;
+  onReceiptSave?: (outletId: string, poItemId: string, colorName: string | null, orderedQty: number, fields: ReceiptFields) => Promise<void>;
 }) {
   const [local, setLocal] = React.useState<Record<string, { shipDate?: string; arrivalDate?: string }>>({});
   const [saving, setSaving] = React.useState<Record<string, boolean>>({});
@@ -299,20 +373,40 @@ function OutletShipmentBlock({ outlet, itemIds, batches, poSentDate, targetSuppl
           <Plus size={12} /> {adding ? "Adding…" : "Add shipment"}
         </button>
       </div>
+
+      {/* Goods receipt for this outlet — writes to the same records the Outlet
+          Receipt Submit / China Warehouse Receiving pages show, once at least
+          one shipment has been recorded so there's a delivery to attach it to. */}
+      {rows.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-gray-100 space-y-1.5">
+          <p className="text-[10px] text-gray-400 font-medium">Goods receipt</p>
+          {items.filter(i => itemOutletPairs(i, outlet.id) > 0).map(item => (
+            <ReceivingRow
+              key={item.id}
+              item={item}
+              ordered={itemOutletPairs(item, outlet.id)}
+              existing={delivery?.receiptItems.find(ri => ri.poItemId === item.id)}
+              onSave={onReceiptSave ? (poItemId, colorName, orderedQty, fields) => onReceiptSave(outlet.id, poItemId, colorName, orderedQty, fields) : undefined}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete }: {
+function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, outletDeliveries, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete, onReceiptSave }: {
   grp: { key: string; pairs: number; items: TimelinePO["items"] };
   poSentDate: Date | null;
   targetSupplierShip: Date | null;
   outlets: TimelineOutlet[];
+  outletDeliveries: TimelineOutletDelivery[];
   onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onBatchDelete?: (batchId: string) => Promise<void>;
   onGroupAdd?: (itemIds: string[], outletId: string) => Promise<void>;
   onGroupUpdate?: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onGroupDelete?: (groupId: string) => Promise<void>;
+  onReceiptSave?: (outletId: string, poItemId: string, colorName: string | null, orderedQty: number, fields: ReceiptFields) => Promise<void>;
 }) {
   const [saving, setSaving] = React.useState<Record<string, boolean>>({});
   const itemIds = grp.items.map(i => i.id);
@@ -354,13 +448,16 @@ function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatc
           <OutletShipmentBlock
             key={o.id}
             outlet={o}
+            items={grp.items}
             itemIds={itemIds}
             batches={allBatches.filter(b => b.outletId === o.id)}
+            delivery={outletDeliveries.find(d => d.outletId === o.id)}
             poSentDate={poSentDate}
             targetSupplierShip={targetSupplierShip}
             onGroupAdd={onGroupAdd}
             onGroupUpdate={onGroupUpdate}
             onGroupDelete={onGroupDelete}
+            onReceiptSave={onReceiptSave}
           />
         ))}
       </div>
@@ -394,15 +491,17 @@ function SkuGroupShipment({ grp, poSentDate, targetSupplierShip, outlets, onBatc
 
 // ─── Timeline ─────────────────────────────────────────────────────────────────
 
-export function Timeline<TPO extends TimelinePO>({ po, outlets = [], onSave, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete }: {
+export function Timeline<TPO extends TimelinePO>({ po, outlets = [], outletDeliveries = [], onSave, onBatchUpdate, onBatchDelete, onGroupAdd, onGroupUpdate, onGroupDelete, onReceiptSave }: {
   po: TPO;
   outlets?: TimelineOutlet[];
+  outletDeliveries?: TimelineOutletDelivery[];
   onSave?: (field: "shipDate" | "deliveryDate", value: string) => void;
   onBatchUpdate?: (batchId: string, fields: { pairs?: number; shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onBatchDelete?: (batchId: string) => Promise<void>;
   onGroupAdd?: (itemIds: string[], outletId: string) => Promise<void>;
   onGroupUpdate?: (groupId: string, fields: { shipDate?: string | null; arrivalDate?: string | null }) => Promise<void>;
   onGroupDelete?: (groupId: string) => Promise<void>;
+  onReceiptSave?: (outletId: string, poItemId: string, colorName: string | null, orderedQty: number, fields: ReceiptFields) => Promise<void>;
 }) {
   const poSentDate   = po.date         ? new Date(po.date)         : null;
   const arriveActual = po.deliveryDate ? new Date(po.deliveryDate) : null;
@@ -487,11 +586,13 @@ export function Timeline<TPO extends TimelinePO>({ po, outlets = [], onSave, onB
                     poSentDate={poSentDate}
                     targetSupplierShip={targetSupplierShip}
                     outlets={outlets}
+                    outletDeliveries={outletDeliveries}
                     onBatchUpdate={onBatchUpdate}
                     onBatchDelete={onBatchDelete}
                     onGroupAdd={onGroupAdd}
                     onGroupUpdate={onGroupUpdate}
                     onGroupDelete={onGroupDelete}
+                    onReceiptSave={onReceiptSave}
                   />
                 </div>
               );

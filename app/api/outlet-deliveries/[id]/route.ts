@@ -55,6 +55,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           data: {
             receivedQty: ri.receivedQty != null ? Number(ri.receivedQty) : undefined,
             defectQty:   ri.defectQty   != null ? Number(ri.defectQty)   : undefined,
+            missingQty:  ri.missingQty  != null ? Number(ri.missingQty)  : undefined,
             notes:       ri.notes       ?? undefined,
             receiptDate: now,
             ...sizeFields,       // overrides the aggregate fields above when size-level data is present
@@ -70,6 +71,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             orderedQty:  ri.orderedQty  ?? 0,
             receivedQty: ri.receivedQty != null ? Number(ri.receivedQty) : null,
             defectQty:   ri.defectQty   != null ? Number(ri.defectQty)   : null,
+            missingQty:  ri.missingQty  != null ? Number(ri.missingQty)  : null,
             notes:       ri.notes       ?? null,
             receiptDate: now,
             ...sizeFields,       // overrides the aggregate fields above when size-level data is present
